@@ -21,8 +21,8 @@ if requirements_file.exists():
 
 setup(
     name="adapt-agents",
-    version="2.0.0",
-    description="Modular Diagnostic Agents Library for RCA Workflows",
+    version="3.0.0",
+    description="Production-Ready Modular Diagnostic Agents Library with Async/Await, LLM Integration, and Enterprise Features",
     long_description=long_description,
     long_description_content_type="text/markdown",
     author="ADAPT-Agents Contributors",

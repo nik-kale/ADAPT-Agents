@@ -12,9 +12,11 @@ from .base_agent import (
     ConfidenceLevel,
     AgentCapabilities
 )
+from .base_agent_async import AsyncBaseAgent
 
 __all__ = [
     'BaseAgent',
+    'AsyncBaseAgent',
     'BaseAgentInput',
     'BaseAgentOutput',
     'Finding',
