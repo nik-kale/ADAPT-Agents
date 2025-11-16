@@ -1,27 +1,37 @@
 """
 Metrics Analyzer Agent
 Analyzes time-series metrics to identify anomalies, trends, and correlations.
+Now with async/await, LLM integration, caching, and metrics!
 """
 
 from typing import Dict, Any, List, Tuple
 from datetime import datetime
 import statistics
 from schemas import (
-    BaseAgent, BaseAgentInput, BaseAgentOutput,
+    AsyncBaseAgent, BaseAgentInput, BaseAgentOutput,
     Finding, AgentStatus, ConfidenceLevel, AgentCapabilities
 )
+from utils.metrics import record_execution_metrics
+from utils.caching import get_cache
+from utils.logging import get_logger
 
 
-class MetricsAnalyzerAgent(BaseAgent):
+class MetricsAnalyzerAgent(AsyncBaseAgent):
     """
     Specialized agent for analyzing time-series metrics to identify:
     - Anomalies (spikes, drops, unusual patterns)
     - Threshold violations
     - Correlations between metrics
     - Resource saturation and trends
+
+    Now with:
+    - Async/await execution
+    - Optional LLM-powered analysis
+    - Result caching
+    - Prometheus metrics
     """
 
-    def __init__(self):
+    def __init__(self, use_llm: bool = False):
         capabilities = AgentCapabilities(
             name="MetricsAnalyzerAgent",
             description="Analyzes time-series metrics for anomalies, correlations, and trends",
@@ -32,12 +42,39 @@ class MetricsAnalyzerAgent(BaseAgent):
             max_context_tokens=150000
         )
         super().__init__("MetricsAnalyzerAgent", capabilities)
+        self.use_llm = use_llm
+        self.cache = get_cache()
+        self.logger = get_logger(__name__)
+        self.llm = None
 
-    def execute(self, input_data: BaseAgentInput) -> BaseAgentOutput:
-        """Execute metrics analysis"""
+        if use_llm:
+            from llm.base_llm import get_llm
+            self.llm = get_llm()
+
+    @record_execution_metrics
+    async def execute_async(self, input_data: BaseAgentInput) -> BaseAgentOutput:
+        """
+        Execute metrics analysis asynchronously.
+
+        Args:
+            input_data: Contains metrics and analysis parameters
+
+        Returns:
+            BaseAgentOutput with findings and analysis results
+        """
         start_time = datetime.now()
 
+        self.logger.info("Starting metrics analysis", agent=self.name)
+
         try:
+            # Check cache first
+            cached_result = await self.cache.get(self.name, input_data)
+            if cached_result:
+                self.logger.info("Cache hit", agent=self.name)
+                return cached_result
+
+            self.logger.info("Cache miss, performing analysis", agent=self.name)
+
             metrics = input_data.context.get("metrics", [])
             parameters = input_data.parameters or {}
             incident_time = input_data.context.get("incident_time")
@@ -49,7 +86,7 @@ class MetricsAnalyzerAgent(BaseAgent):
 
             execution_time = (datetime.now() - start_time).total_seconds() * 1000
 
-            return BaseAgentOutput(
+            result = BaseAgentOutput(
                 agent_name=self.name,
                 status=AgentStatus.COMPLETED,
                 findings=findings,
@@ -60,8 +97,22 @@ class MetricsAnalyzerAgent(BaseAgent):
                 execution_time_ms=execution_time
             )
 
+            # Cache the result
+            await self.cache.set(self.name, input_data, result)
+
+            self.logger.info("Metrics analysis complete",
+                           agent=self.name,
+                           findings_count=len(findings),
+                           execution_time_ms=execution_time)
+
+            return result
+
         except Exception as e:
             execution_time = (datetime.now() - start_time).total_seconds() * 1000
+            self.logger.error("Metrics analysis failed",
+                            agent=self.name,
+                            error=str(e),
+                            execution_time_ms=execution_time)
             return BaseAgentOutput(
                 agent_name=self.name,
                 status=AgentStatus.FAILED,

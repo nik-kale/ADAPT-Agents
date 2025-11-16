@@ -1,10 +1,10 @@
 """
 Base LLM Interface
-Provides abstraction for different LLM providers
+Provides abstraction for different LLM providers with streaming support
 """
 
 from abc import ABC, abstractmethod
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, AsyncIterator
 from pydantic import BaseModel
 
 
@@ -96,6 +96,54 @@ class BaseLLM(ABC):
             LLMResponse with generated content and metadata
         """
         pass
+
+    async def stream(
+        self,
+        prompt: str,
+        system_prompt: Optional[str] = None,
+        **kwargs
+    ) -> AsyncIterator[str]:
+        """
+        Stream text response from LLM chunk by chunk.
+
+        Args:
+            prompt: User prompt
+            system_prompt: Optional system prompt
+            **kwargs: Additional provider-specific parameters
+
+        Yields:
+            Text chunks as they are generated
+
+        Note:
+            Default implementation calls generate() and yields full response.
+            Override in provider implementations for true streaming.
+        """
+        # Default non-streaming implementation
+        response = await self.generate(prompt, system_prompt, **kwargs)
+        yield response
+
+    async def stream_with_messages(
+        self,
+        messages: List[LLMMessage],
+        **kwargs
+    ) -> AsyncIterator[str]:
+        """
+        Stream response from message history chunk by chunk.
+
+        Args:
+            messages: List of conversation messages
+            **kwargs: Additional provider-specific parameters
+
+        Yields:
+            Text chunks as they are generated
+
+        Note:
+            Default implementation calls generate_with_messages() and yields full response.
+            Override in provider implementations for true streaming.
+        """
+        # Default non-streaming implementation
+        response = await self.generate_with_messages(messages, **kwargs)
+        yield response.content
 
     def count_tokens(self, text: str) -> int:
         """

@@ -1,26 +1,36 @@
 """
 Remediation Planner Agent
 Generates actionable remediation plans based on validated hypotheses.
+Now with async/await, LLM integration, caching, and metrics!
 """
 
 from typing import Dict, Any, List
 from datetime import datetime
 from schemas import (
-    BaseAgent, BaseAgentInput, BaseAgentOutput,
+    AsyncBaseAgent, BaseAgentInput, BaseAgentOutput,
     Finding, AgentStatus, ConfidenceLevel, AgentCapabilities
 )
+from utils.metrics import record_execution_metrics
+from utils.caching import get_cache
+from utils.logging import get_logger
 
 
-class RemediationPlannerAgent(BaseAgent):
+class RemediationPlannerAgent(AsyncBaseAgent):
     """
     Specialized agent for generating remediation plans:
     - Immediate mitigation steps
     - Root cause fix procedures
     - Validation and rollback plans
     - Prevention measures
+
+    Now with:
+    - Async/await execution
+    - Optional LLM-powered analysis
+    - Result caching
+    - Prometheus metrics
     """
 
-    def __init__(self):
+    def __init__(self, use_llm: bool = False):
         capabilities = AgentCapabilities(
             name="RemediationPlannerAgent",
             description="Generates actionable remediation plans for validated root causes",
@@ -30,12 +40,39 @@ class RemediationPlannerAgent(BaseAgent):
             supports_streaming=False
         )
         super().__init__("RemediationPlannerAgent", capabilities)
+        self.use_llm = use_llm
+        self.cache = get_cache()
+        self.logger = get_logger(__name__)
+        self.llm = None
 
-    def execute(self, input_data: BaseAgentInput) -> BaseAgentOutput:
-        """Execute remediation planning"""
+        if use_llm:
+            from llm.base_llm import get_llm
+            self.llm = get_llm()
+
+    @record_execution_metrics
+    async def execute_async(self, input_data: BaseAgentInput) -> BaseAgentOutput:
+        """
+        Execute remediation planning asynchronously.
+
+        Args:
+            input_data: Contains validated hypothesis and context
+
+        Returns:
+            BaseAgentOutput with remediation plans
+        """
         start_time = datetime.now()
 
+        self.logger.info("Starting remediation planning", agent=self.name)
+
         try:
+            # Check cache first
+            cached_result = await self.cache.get(self.name, input_data)
+            if cached_result:
+                self.logger.info("Cache hit", agent=self.name)
+                return cached_result
+
+            self.logger.info("Cache miss, performing analysis", agent=self.name)
+
             context = input_data.context
             parameters = input_data.parameters or {}
 
@@ -52,7 +89,7 @@ class RemediationPlannerAgent(BaseAgent):
 
             execution_time = (datetime.now() - start_time).total_seconds() * 1000
 
-            return BaseAgentOutput(
+            result = BaseAgentOutput(
                 agent_name=self.name,
                 status=AgentStatus.COMPLETED,
                 findings=plans,
@@ -63,8 +100,22 @@ class RemediationPlannerAgent(BaseAgent):
                 execution_time_ms=execution_time
             )
 
+            # Cache the result
+            await self.cache.set(self.name, input_data, result)
+
+            self.logger.info("Remediation planning complete",
+                           agent=self.name,
+                           plans_count=len(plans),
+                           execution_time_ms=execution_time)
+
+            return result
+
         except Exception as e:
             execution_time = (datetime.now() - start_time).total_seconds() * 1000
+            self.logger.error("Remediation planning failed",
+                            agent=self.name,
+                            error=str(e),
+                            execution_time_ms=execution_time)
             return BaseAgentOutput(
                 agent_name=self.name,
                 status=AgentStatus.FAILED,

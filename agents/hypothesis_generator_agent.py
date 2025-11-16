@@ -1,26 +1,36 @@
 """
 Hypothesis Generator Agent
 Synthesizes findings from multiple agents to generate root cause hypotheses.
+Now with async/await, LLM integration, caching, and metrics!
 """
 
 from typing import Dict, Any, List
 from datetime import datetime
 from schemas import (
-    BaseAgent, BaseAgentInput, BaseAgentOutput,
+    AsyncBaseAgent, BaseAgentInput, BaseAgentOutput,
     Finding, AgentStatus, ConfidenceLevel, AgentCapabilities
 )
+from utils.metrics import record_execution_metrics
+from utils.caching import get_cache
+from utils.logging import get_logger
 
 
-class HypothesisGeneratorAgent(BaseAgent):
+class HypothesisGeneratorAgent(AsyncBaseAgent):
     """
     Specialized agent for generating root cause hypotheses:
     - Synthesizes findings from multiple diagnostic agents
     - Generates ranked hypotheses
     - Suggests validation tests
     - Identifies evidence gaps
+
+    Now with:
+    - Async/await execution
+    - Optional LLM-powered analysis
+    - Result caching
+    - Prometheus metrics
     """
 
-    def __init__(self):
+    def __init__(self, use_llm: bool = False):
         capabilities = AgentCapabilities(
             name="HypothesisGeneratorAgent",
             description="Generates and ranks root cause hypotheses from multi-source evidence",
@@ -30,6 +40,14 @@ class HypothesisGeneratorAgent(BaseAgent):
             supports_streaming=False
         )
         super().__init__("HypothesisGeneratorAgent", capabilities)
+        self.use_llm = use_llm
+        self.cache = get_cache()
+        self.logger = get_logger(__name__)
+        self.llm = None
+
+        if use_llm:
+            from llm.base_llm import get_llm
+            self.llm = get_llm()
 
     # Known failure patterns
     FAILURE_PATTERNS = {
@@ -51,11 +69,30 @@ class HypothesisGeneratorAgent(BaseAgent):
         }
     }
 
-    def execute(self, input_data: BaseAgentInput) -> BaseAgentOutput:
-        """Execute hypothesis generation"""
+    @record_execution_metrics
+    async def execute_async(self, input_data: BaseAgentInput) -> BaseAgentOutput:
+        """
+        Execute hypothesis generation asynchronously.
+
+        Args:
+            input_data: Contains findings from multiple agents
+
+        Returns:
+            BaseAgentOutput with ranked hypotheses
+        """
         start_time = datetime.now()
 
+        self.logger.info("Starting hypothesis generation", agent=self.name)
+
         try:
+            # Check cache first
+            cached_result = await self.cache.get(self.name, input_data)
+            if cached_result:
+                self.logger.info("Cache hit", agent=self.name)
+                return cached_result
+
+            self.logger.info("Cache miss, performing analysis", agent=self.name)
+
             context = input_data.context
             parameters = input_data.parameters or {}
 
@@ -78,7 +115,7 @@ class HypothesisGeneratorAgent(BaseAgent):
 
             execution_time = (datetime.now() - start_time).total_seconds() * 1000
 
-            return BaseAgentOutput(
+            result = BaseAgentOutput(
                 agent_name=self.name,
                 status=AgentStatus.COMPLETED,
                 findings=hypotheses,
@@ -89,8 +126,22 @@ class HypothesisGeneratorAgent(BaseAgent):
                 execution_time_ms=execution_time
             )
 
+            # Cache the result
+            await self.cache.set(self.name, input_data, result)
+
+            self.logger.info("Hypothesis generation complete",
+                           agent=self.name,
+                           hypotheses_count=len(hypotheses),
+                           execution_time_ms=execution_time)
+
+            return result
+
         except Exception as e:
             execution_time = (datetime.now() - start_time).total_seconds() * 1000
+            self.logger.error("Hypothesis generation failed",
+                            agent=self.name,
+                            error=str(e),
+                            execution_time_ms=execution_time)
             return BaseAgentOutput(
                 agent_name=self.name,
                 status=AgentStatus.FAILED,

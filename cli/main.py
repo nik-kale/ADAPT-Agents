@@ -7,14 +7,15 @@ Command-line interface for agent operations
 import click
 import json
 import sys
+import asyncio
 from pathlib import Path
 from typing import Optional
 
 
 @click.group()
-@click.version_option(version="2.0.0")
+@click.version_option(version="3.0.0")
 def cli():
-    """ADAPT-Agents - Modular Diagnostic Agents Library"""
+    """ADAPT-Agents - Modular Diagnostic Agents Library v3.0"""
     pass
 
 
@@ -23,9 +24,10 @@ def cli():
 @click.option('--agent', '-a', multiple=True, help='Specific agents to run (log, metrics, change, topology, hypothesis, remediation)')
 @click.option('--output', '-o', type=click.Path(), help='Output file path')
 @click.option('--format', '-f', type=click.Choice(['json', 'yaml', 'text']), default='text', help='Output format')
-@click.option('--async', 'use_async', is_flag=True, help='Use async execution')
-def analyze(incident_file: str, agent: tuple, output: Optional[str], format: str, use_async: bool):
-    """Run RCA analysis on incident data"""
+@click.option('--use-llm', is_flag=True, help='Enable LLM-powered analysis')
+@click.option('--filter-pii', is_flag=True, help='Enable PII filtering')
+def analyze(incident_file: str, agent: tuple, output: Optional[str], format: str, use_llm: bool, filter_pii: bool):
+    """Run RCA analysis on incident data (using AsyncAgentOrchestrator by default)"""
     # Load incident data
     with open(incident_file) as f:
         if incident_file.endswith('.json'):
@@ -37,15 +39,19 @@ def analyze(incident_file: str, agent: tuple, output: Optional[str], format: str
             click.echo("Error: Unsupported file format. Use .json or .yaml", err=True)
             sys.exit(1)
 
-    # Run analysis
+    # Run analysis (always use async now)
     if agent:
         # Run specific agents
-        results = run_specific_agents(list(agent), incident_data, use_async)
+        results = asyncio.run(run_specific_agents_async(list(agent), incident_data, use_llm))
     else:
-        # Run full chain
-        from chains.orchestrator import AgentOrchestrator
-        orchestrator = AgentOrchestrator(error_strategy="continue")
-        results = orchestrator.execute_rca_chain(incident_data)
+        # Run full chain with AsyncAgentOrchestrator
+        from chains.async_orchestrator import AsyncAgentOrchestrator
+        orchestrator = AsyncAgentOrchestrator(
+            error_strategy="continue",
+            use_llm=use_llm,
+            filter_pii=filter_pii
+        )
+        results = asyncio.run(orchestrator.execute_rca_chain(incident_data))
 
     # Output results
     if output:
@@ -54,13 +60,13 @@ def analyze(incident_file: str, agent: tuple, output: Optional[str], format: str
         if format == 'json':
             click.echo(json.dumps(results, indent=2, default=str))
         elif format == 'text':
-            from chains.orchestrator import AgentOrchestrator
-            orchestrator = AgentOrchestrator()
+            from chains.async_orchestrator import AsyncAgentOrchestrator
+            orchestrator = AsyncAgentOrchestrator()
             orchestrator.print_results(results)
 
 
-def run_specific_agents(agent_names: list, incident_data: dict, use_async: bool):
-    """Run specific agents only"""
+async def run_specific_agents_async(agent_names: list, incident_data: dict, use_llm: bool = False):
+    """Run specific agents asynchronously"""
     from agents import (
         LogAnalyzerAgent, MetricsAnalyzerAgent, ChangeCorrelatorAgent,
         TopologyInferenceAgent, HypothesisGeneratorAgent, RemediationPlannerAgent
@@ -83,7 +89,7 @@ def run_specific_agents(agent_names: list, incident_data: dict, use_async: bool)
             continue
 
         agent_class = agent_map[agent_name]
-        agent = agent_class()
+        agent = agent_class(use_llm=use_llm)
 
         # Prepare input based on agent type
         input_data = BaseAgentInput(
@@ -91,8 +97,8 @@ def run_specific_agents(agent_names: list, incident_data: dict, use_async: bool)
             parameters=incident_data.get('parameters', {})
         )
 
-        # Execute
-        result = agent.execute(input_data)
+        # Execute async
+        result = await agent.execute_async(input_data)
         results[agent_name] = result
 
     return results
@@ -183,8 +189,8 @@ def metrics(port: int):
 @cli.command()
 def version():
     """Show version information"""
-    click.echo("ADAPT-Agents v2.0.0")
-    click.echo("Modular Diagnostic Agents Library")
+    click.echo("ADAPT-Agents v3.0.0")
+    click.echo("Modular Diagnostic Agents Library with Async/Await & LLM Integration")
 
 
 @cli.command()

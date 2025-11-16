@@ -1,26 +1,36 @@
 """
 Change Correlator Agent
 Correlates change events with incidents to identify potential root causes.
+Now with async/await, LLM integration, caching, and metrics!
 """
 
 from typing import Dict, Any, List
 from datetime import datetime, timedelta
 from schemas import (
-    BaseAgent, BaseAgentInput, BaseAgentOutput,
+    AsyncBaseAgent, BaseAgentInput, BaseAgentOutput,
     Finding, AgentStatus, ConfidenceLevel, AgentCapabilities
 )
+from utils.metrics import record_execution_metrics
+from utils.caching import get_cache
+from utils.logging import get_logger
 
 
-class ChangeCorrelatorAgent(BaseAgent):
+class ChangeCorrelatorAgent(AsyncBaseAgent):
     """
     Specialized agent for correlating change events with incidents:
     - Temporal correlation of changes and incidents
     - Change risk assessment
     - Blast radius determination
     - Service impact mapping
+
+    Now with:
+    - Async/await execution
+    - Optional LLM-powered analysis
+    - Result caching
+    - Prometheus metrics
     """
 
-    def __init__(self):
+    def __init__(self, use_llm: bool = False):
         capabilities = AgentCapabilities(
             name="ChangeCorrelatorAgent",
             description="Correlates change events with incidents to identify root causes",
@@ -30,12 +40,39 @@ class ChangeCorrelatorAgent(BaseAgent):
             supports_streaming=False
         )
         super().__init__("ChangeCorrelatorAgent", capabilities)
+        self.use_llm = use_llm
+        self.cache = get_cache()
+        self.logger = get_logger(__name__)
+        self.llm = None
 
-    def execute(self, input_data: BaseAgentInput) -> BaseAgentOutput:
-        """Execute change correlation analysis"""
+        if use_llm:
+            from llm.base_llm import get_llm
+            self.llm = get_llm()
+
+    @record_execution_metrics
+    async def execute_async(self, input_data: BaseAgentInput) -> BaseAgentOutput:
+        """
+        Execute change correlation analysis asynchronously.
+
+        Args:
+            input_data: Contains changes and incident information
+
+        Returns:
+            BaseAgentOutput with correlation findings
+        """
         start_time = datetime.now()
 
+        self.logger.info("Starting change correlation", agent=self.name)
+
         try:
+            # Check cache first
+            cached_result = await self.cache.get(self.name, input_data)
+            if cached_result:
+                self.logger.info("Cache hit", agent=self.name)
+                return cached_result
+
+            self.logger.info("Cache miss, performing analysis", agent=self.name)
+
             changes = input_data.context.get("changes", [])
             incident_time = input_data.context.get("incident_time")
             affected_services = input_data.context.get("affected_services", [])
@@ -48,7 +85,7 @@ class ChangeCorrelatorAgent(BaseAgent):
 
             execution_time = (datetime.now() - start_time).total_seconds() * 1000
 
-            return BaseAgentOutput(
+            result = BaseAgentOutput(
                 agent_name=self.name,
                 status=AgentStatus.COMPLETED,
                 findings=findings,
@@ -59,8 +96,22 @@ class ChangeCorrelatorAgent(BaseAgent):
                 execution_time_ms=execution_time
             )
 
+            # Cache the result
+            await self.cache.set(self.name, input_data, result)
+
+            self.logger.info("Change correlation complete",
+                           agent=self.name,
+                           findings_count=len(findings),
+                           execution_time_ms=execution_time)
+
+            return result
+
         except Exception as e:
             execution_time = (datetime.now() - start_time).total_seconds() * 1000
+            self.logger.error("Change correlation failed",
+                            agent=self.name,
+                            error=str(e),
+                            execution_time_ms=execution_time)
             return BaseAgentOutput(
                 agent_name=self.name,
                 status=AgentStatus.FAILED,

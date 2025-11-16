@@ -1,26 +1,37 @@
 """
 Topology Inference Agent
 Infers service dependencies and topology from observational data.
+Now with async/await, LLM integration, caching, and metrics!
 """
 
 from typing import Dict, Any, List, Set, Tuple
 from collections import defaultdict
+from datetime import datetime
 from schemas import (
-    BaseAgent, BaseAgentInput, BaseAgentOutput,
+    AsyncBaseAgent, BaseAgentInput, BaseAgentOutput,
     Finding, AgentStatus, ConfidenceLevel, AgentCapabilities
 )
+from utils.metrics import record_execution_metrics
+from utils.caching import get_cache
+from utils.logging import get_logger
 
 
-class TopologyInferenceAgent(BaseAgent):
+class TopologyInferenceAgent(AsyncBaseAgent):
     """
     Specialized agent for inferring service topology:
     - Service discovery from logs/traces/metrics
     - Dependency mapping
     - Critical path identification
     - Bottleneck detection
+
+    Now with:
+    - Async/await execution
+    - Optional LLM-powered analysis
+    - Result caching
+    - Prometheus metrics
     """
 
-    def __init__(self):
+    def __init__(self, use_llm: bool = False):
         capabilities = AgentCapabilities(
             name="TopologyInferenceAgent",
             description="Infers service dependencies and topology from runtime data",
@@ -30,12 +41,39 @@ class TopologyInferenceAgent(BaseAgent):
             supports_streaming=False
         )
         super().__init__("TopologyInferenceAgent", capabilities)
+        self.use_llm = use_llm
+        self.cache = get_cache()
+        self.logger = get_logger(__name__)
+        self.llm = None
 
-    def execute(self, input_data: BaseAgentInput) -> BaseAgentOutput:
-        """Execute topology inference"""
+        if use_llm:
+            from llm.base_llm import get_llm
+            self.llm = get_llm()
+
+    @record_execution_metrics
+    async def execute_async(self, input_data: BaseAgentInput) -> BaseAgentOutput:
+        """
+        Execute topology inference asynchronously.
+
+        Args:
+            input_data: Contains logs, traces, and metrics
+
+        Returns:
+            BaseAgentOutput with topology findings
+        """
         start_time = datetime.now()
 
+        self.logger.info("Starting topology inference", agent=self.name)
+
         try:
+            # Check cache first
+            cached_result = await self.cache.get(self.name, input_data)
+            if cached_result:
+                self.logger.info("Cache hit", agent=self.name)
+                return cached_result
+
+            self.logger.info("Cache miss, performing analysis", agent=self.name)
+
             logs = input_data.context.get("logs", [])
             traces = input_data.context.get("traces", [])
             metrics = input_data.context.get("metrics", [])
@@ -54,7 +92,7 @@ class TopologyInferenceAgent(BaseAgent):
 
             execution_time = (datetime.now() - start_time).total_seconds() * 1000
 
-            return BaseAgentOutput(
+            result = BaseAgentOutput(
                 agent_name=self.name,
                 status=AgentStatus.COMPLETED,
                 findings=findings,
@@ -66,9 +104,22 @@ class TopologyInferenceAgent(BaseAgent):
                 metadata={"topology": topology}
             )
 
+            # Cache the result
+            await self.cache.set(self.name, input_data, result)
+
+            self.logger.info("Topology inference complete",
+                           agent=self.name,
+                           findings_count=len(findings),
+                           execution_time_ms=execution_time)
+
+            return result
+
         except Exception as e:
-            from datetime import datetime
             execution_time = (datetime.now() - start_time).total_seconds() * 1000
+            self.logger.error("Topology inference failed",
+                            agent=self.name,
+                            error=str(e),
+                            execution_time_ms=execution_time)
             return BaseAgentOutput(
                 agent_name=self.name,
                 status=AgentStatus.FAILED,
@@ -314,7 +365,3 @@ class TopologyInferenceAgent(BaseAgent):
         steps.append("Validate inferred dependencies against architecture docs")
 
         return steps
-
-
-# Import datetime at module level
-from datetime import datetime
