@@ -1,0 +1,93 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: adapt-agents
+  labels:
+    app: adapt-agents
+    component: core
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: adapt-agents
+  template:
+    metadata:
+      labels:
+        app: adapt-agents
+        component: core
+    spec:
+      containers:
+      - name: adapt-agents
+        image: adapt-agents:3.0.0
+        ports:
+        - containerPort: 8000
+          name: http
+          protocol: TCP
+        - containerPort: 9090
+          name: metrics
+          protocol: TCP
+        env:
+        - name: ADAPT_LLM_PROVIDER
+          value: "openai"
+        - name: ADAPT_LLM_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: adapt-secrets
+              key: llm-api-key
+        - name: ADAPT_CACHE_BACKEND
+          value: "redis"
+        - name: ADAPT_CACHE_REDIS_URL
+          value: "redis://redis:6379"
+        - name: ADAPT_LOG_LEVEL
+          value: "INFO"
+        - name: ADAPT_ENABLE_METRICS
+          value: "true"
+        - name: ADAPT_ENABLE_CACHING
+          value: "true"
+        - name: ADAPT_ENABLE_PII_FILTERING
+          value: "true"
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+      imagePullSecrets:
+      - name: regcred
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: adapt-agents
+  labels:
+    app: adapt-agents
+spec:
+  type: ClusterIP
+  ports:
+  - port: 8000
+    targetPort: 8000
+    protocol: TCP
+    name: http
+  - port: 9090
+    targetPort: 9090
+    protocol: TCP
+    name: metrics
+  selector:
+    app: adapt-agents

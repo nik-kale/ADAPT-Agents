@@ -1,0 +1,48 @@
+# Prometheus configuration for ADAPT-Agents
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'adapt-agents'
+    environment: 'production'
+
+# Scrape configurations
+scrape_configs:
+  # ADAPT-Agents metrics
+  - job_name: 'adapt-agents'
+    static_configs:
+      - targets: ['adapt-agents:9090']
+        labels:
+          service: 'adapt-agents'
+          component: 'core'
+
+  # API server metrics
+  - job_name: 'adapt-api'
+    static_configs:
+      - targets: ['adapt-agents:8000']
+        labels:
+          service: 'adapt-agents'
+          component: 'api'
+
+  # Node exporter for system metrics
+  - job_name: 'node'
+    static_configs:
+      - targets: ['node-exporter:9100']
+
+  # Redis metrics
+  - job_name: 'redis'
+    static_configs:
+      - targets: ['redis:6379']
+        labels:
+          service: 'redis'
+          component: 'cache'
+
+# Alerting rules
+rule_files:
+  - 'alerts.yml'
+
+# Alertmanager configuration
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ['alertmanager:9093']

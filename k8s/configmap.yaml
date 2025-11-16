@@ -1,0 +1,37 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: adapt-config
+  labels:
+    app: adapt-agents
+data:
+  # Execution settings
+  default_timeout_seconds: "30"
+  max_retries: "3"
+  retry_backoff_base: "2.0"
+  enable_async: "true"
+
+  # Agent settings
+  log_analyzer_max_findings: "10"
+  metrics_analyzer_anomaly_threshold: "3.0"
+  hypothesis_max_hypotheses: "5"
+
+  # LLM settings
+  llm_provider: "openai"
+  llm_model: "gpt-4"
+  llm_temperature: "0.0"
+  llm_max_tokens: "4000"
+
+  # Cache settings
+  cache_backend: "redis"
+  cache_ttl_seconds: "300"
+
+  # Observability settings
+  log_level: "INFO"
+  log_format: "json"
+  enable_tracing: "true"
+  enable_metrics: "true"
+
+  # Security settings
+  enable_pii_filtering: "true"
+  enable_audit_logging: "false"
