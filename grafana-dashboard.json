@@ -1,0 +1,83 @@
+{
+  "dashboard": {
+    "title": "ADAPT-Agents Monitoring Dashboard",
+    "tags": ["adapt-agents", "rca", "diagnostics"],
+    "timezone": "browser",
+    "panels": [
+      {
+        "id": 1,
+        "title": "Agent Execution Rate",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(adapt_agent_executions_total[5m])",
+            "legendFormat": "{{agent_name}} - {{status}}"
+          }
+        ],
+        "gridPos": {"x": 0, "y": 0, "w": 12, "h": 8}
+      },
+      {
+        "id": 2,
+        "title": "Agent Execution Duration (p95)",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, rate(adapt_agent_execution_duration_seconds_bucket[5m]))",
+            "legendFormat": "{{agent_name}}"
+          }
+        ],
+        "gridPos": {"x": 12, "y": 0, "w": 12, "h": 8}
+      },
+      {
+        "id": 3,
+        "title": "Cache Hit Rate",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "sum(rate(adapt_cache_hits_total[5m])) / (sum(rate(adapt_cache_hits_total[5m])) + sum(rate(adapt_cache_misses_total[5m])))",
+            "legendFormat": "Hit Rate"
+          }
+        ],
+        "gridPos": {"x": 0, "y": 8, "w": 6, "h": 4}
+      },
+      {
+        "id": 4,
+        "title": "Active Agent Executions",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "sum(adapt_active_agent_executions)",
+            "legendFormat": "Active"
+          }
+        ],
+        "gridPos": {"x": 6, "y": 8, "w": 6, "h": 4}
+      },
+      {
+        "id": 5,
+        "title": "Findings by Type",
+        "type": "piechart",
+        "targets": [
+          {
+            "expr": "sum by (finding_type) (adapt_agent_findings_total)",
+            "legendFormat": "{{finding_type}}"
+          }
+        ],
+        "gridPos": {"x": 12, "y": 8, "w": 12, "h": 8}
+      },
+      {
+        "id": 6,
+        "title": "Error Rate",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(adapt_agent_executions_total{status=\"failed\"}[5m])",
+            "legendFormat": "{{agent_name}}"
+          }
+        ],
+        "gridPos": {"x": 0, "y": 16, "w": 24, "h": 8}
+      }
+    ],
+    "refresh": "30s",
+    "time": {"from": "now-1h", "to": "now"}
+  }
+}
