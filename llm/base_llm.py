@@ -110,3 +110,54 @@ class BaseLLM(ABC):
         """
         # Rough estimation: ~4 characters per token
         return len(text) // 4
+
+
+# Global LLM instance
+_llm_instance: Optional[BaseLLM] = None
+
+
+def get_llm() -> BaseLLM:
+    """
+    Get configured LLM instance.
+
+    Returns:
+        Configured LLM provider instance
+
+    Raises:
+        ValueError: If LLM provider not configured or API key missing
+    """
+    global _llm_instance
+
+    if _llm_instance is not None:
+        return _llm_instance
+
+    from config.settings import get_settings
+    settings = get_settings()
+
+    if not settings.llm_api_key:
+        raise ValueError(
+            "LLM API key not configured. Set ADAPT_LLM_API_KEY environment variable."
+        )
+
+    if settings.llm_provider == "openai":
+        from llm.openai_llm import OpenAILLM
+        _llm_instance = OpenAILLM(
+            api_key=settings.llm_api_key,
+            model=settings.llm_model,
+            temperature=settings.llm_temperature,
+            max_tokens=settings.llm_max_tokens,
+            timeout=settings.llm_timeout_seconds
+        )
+    elif settings.llm_provider == "anthropic":
+        from llm.anthropic_llm import AnthropicLLM
+        _llm_instance = AnthropicLLM(
+            api_key=settings.llm_api_key,
+            model=settings.llm_model,
+            temperature=settings.llm_temperature,
+            max_tokens=settings.llm_max_tokens,
+            timeout=settings.llm_timeout_seconds
+        )
+    else:
+        raise ValueError(f"Unsupported LLM provider: {settings.llm_provider}")
+
+    return _llm_instance

@@ -25,8 +25,7 @@ class StructuredLogger:
             handler = logging.StreamHandler(sys.stdout)
             handler.setLevel(self.level)
 
-            # Use JSON formatter
-            from utils.json_formatter import JSONFormatter
+            # Use JSON formatter (defined below in this file)
             formatter = JSONFormatter()
             handler.setFormatter(formatter)
 

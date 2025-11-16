@@ -1,15 +1,19 @@
 """
 Log Analyzer Agent
 Analyzes system logs to identify anomalies, errors, and patterns.
+Now with async/await, LLM integration, caching, and metrics!
 """
 
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from datetime import datetime
 from collections import Counter, defaultdict
 from schemas import (
-    BaseAgent, BaseAgentInput, BaseAgentOutput,
+    AsyncBaseAgent, BaseAgentInput, BaseAgentOutput,
     Finding, AgentStatus, ConfidenceLevel, AgentCapabilities
 )
+from utils.metrics import record_execution_metrics
+from utils.caching import get_cache
+from utils.logging import get_logger
 
 
 class LogAnalyzerAgentInput(BaseAgentInput):
@@ -17,16 +21,22 @@ class LogAnalyzerAgentInput(BaseAgentInput):
     pass
 
 
-class LogAnalyzerAgent(BaseAgent):
+class LogAnalyzerAgent(AsyncBaseAgent):
     """
     Specialized agent for analyzing system logs to identify:
     - Error patterns and recurring exceptions
     - Anomalous log behaviors
     - Temporal correlations with incidents
     - Service-level cascading failures
+
+    Now with:
+    - Async/await execution
+    - Optional LLM-powered analysis
+    - Result caching
+    - Prometheus metrics
     """
 
-    def __init__(self):
+    def __init__(self, use_llm: bool = False):
         capabilities = AgentCapabilities(
             name="LogAnalyzerAgent",
             description="Analyzes system logs for error patterns, anomalies, and correlations",
@@ -37,10 +47,19 @@ class LogAnalyzerAgent(BaseAgent):
             max_context_tokens=100000
         )
         super().__init__("LogAnalyzerAgent", capabilities)
+        self.use_llm = use_llm
+        self.cache = get_cache()
+        self.logger = get_logger(__name__)
+        self.llm = None
 
-    def execute(self, input_data: BaseAgentInput) -> BaseAgentOutput:
+        if use_llm:
+            from llm.base_llm import get_llm
+            self.llm = get_llm()
+
+    @record_execution_metrics
+    async def execute_async(self, input_data: BaseAgentInput) -> BaseAgentOutput:
         """
-        Execute log analysis.
+        Execute log analysis asynchronously.
 
         Args:
             input_data: Contains logs and analysis parameters
@@ -50,14 +69,27 @@ class LogAnalyzerAgent(BaseAgent):
         """
         start_time = datetime.now()
 
+        self.logger.info("Starting log analysis", agent=self.name)
+
         try:
+            # Check cache first
+            cached_result = await self.cache.get(self.name, input_data)
+            if cached_result:
+                self.logger.info("Cache hit", agent=self.name)
+                return cached_result
+
+            self.logger.info("Cache miss, performing analysis", agent=self.name)
+
             # Extract logs from context
             logs = input_data.context.get("logs", [])
             incident_time = input_data.context.get("incident_time")
             parameters = input_data.parameters or {}
 
-            # Perform analysis
-            findings = self._analyze_logs(logs, incident_time, parameters)
+            # Perform analysis (rule-based + optional LLM)
+            if self.use_llm and self.llm and len(logs) > 0:
+                findings = await self._analyze_logs_with_llm(logs, incident_time, parameters)
+            else:
+                findings = await self._analyze_logs_rule_based(logs, incident_time, parameters)
 
             # Generate summary
             summary = self._generate_summary(findings, len(logs))
@@ -70,7 +102,7 @@ class LogAnalyzerAgent(BaseAgent):
 
             execution_time = (datetime.now() - start_time).total_seconds() * 1000
 
-            return BaseAgentOutput(
+            result = BaseAgentOutput(
                 agent_name=self.name,
                 status=AgentStatus.COMPLETED,
                 findings=findings,
@@ -81,8 +113,23 @@ class LogAnalyzerAgent(BaseAgent):
                 execution_time_ms=execution_time
             )
 
+            # Cache the result
+            await self.cache.set(self.name, input_data, result)
+
+            self.logger.info("Log analysis completed",
+                           agent=self.name,
+                           findings_count=len(findings),
+                           execution_time_ms=execution_time)
+
+            return result
+
         except Exception as e:
             execution_time = (datetime.now() - start_time).total_seconds() * 1000
+            self.logger.error("Log analysis failed",
+                            agent=self.name,
+                            error=str(e),
+                            execution_time_ms=execution_time)
+
             return BaseAgentOutput(
                 agent_name=self.name,
                 status=AgentStatus.FAILED,
@@ -94,8 +141,72 @@ class LogAnalyzerAgent(BaseAgent):
                 execution_time_ms=execution_time
             )
 
-    def _analyze_logs(self, logs: List[Dict], incident_time: str, parameters: Dict) -> List[Finding]:
-        """Analyze logs and extract findings"""
+    async def _analyze_logs_with_llm(self, logs: List[Dict], incident_time: str, parameters: Dict) -> List[Finding]:
+        """Analyze logs using LLM for deeper insights"""
+        # First get rule-based findings as baseline
+        rule_based_findings = await self._analyze_logs_rule_based(logs, incident_time, parameters)
+
+        # Prepare context for LLM
+        log_sample = logs[:50]  # Limit to avoid token overflow
+        error_logs = [log for log in logs if log.get("level") == "ERROR"][:20]
+
+        prompt = f"""Analyze these system logs to identify root cause indicators:
+
+Incident Time: {incident_time}
+Total Logs: {len(logs)}
+Error Logs: {len(error_logs)}
+
+Sample Error Logs:
+{self._format_logs_for_llm(error_logs)}
+
+Rule-based Findings:
+{self._format_findings_for_llm(rule_based_findings)}
+
+Identify:
+1. Root cause indicators
+2. Error propagation patterns
+3. Temporal correlations
+4. Service dependencies
+
+Respond with structured JSON."""
+
+        try:
+            llm_response = await self.llm.generate_structured(
+                prompt=prompt,
+                schema={
+                    "findings": [
+                        {
+                            "type": "str",
+                            "description": "str",
+                            "confidence": "str",  # HIGH, MEDIUM, LOW
+                            "evidence": ["str"],
+                            "severity": "str"
+                        }
+                    ]
+                }
+            )
+
+            # Convert LLM findings to Finding objects
+            llm_findings = []
+            for f in llm_response.get("findings", []):
+                llm_findings.append(Finding(
+                    type=f.get("type", "llm_insight"),
+                    description=f.get("description", ""),
+                    confidence=ConfidenceLevel[f.get("confidence", "MEDIUM")],
+                    evidence=f.get("evidence", []),
+                    severity=f.get("severity", "MEDIUM"),
+                    metadata={"source": "llm"}
+                ))
+
+            # Combine with rule-based findings
+            return rule_based_findings + llm_findings
+
+        except Exception as e:
+            self.logger.warning(f"LLM analysis failed, using rule-based only: {str(e)}")
+            return rule_based_findings
+
+    async def _analyze_logs_rule_based(self, logs: List[Dict], incident_time: str, parameters: Dict) -> List[Finding]:
+        """Analyze logs using rule-based logic (original implementation)"""
         findings = []
 
         # 1. Error pattern detection
@@ -149,7 +260,8 @@ class LogAnalyzerAgent(BaseAgent):
                     metadata={
                         "affected_services": [service],
                         "error_count": len(occurrences),
-                        "pattern": pattern
+                        "pattern": pattern,
+                        "source": "rule_based"
                     }
                 )
                 findings.append(finding)
@@ -185,7 +297,8 @@ class LogAnalyzerAgent(BaseAgent):
                     metadata={
                         "affected_services": list(services),
                         "trace_id": trace_id,
-                        "cascade_depth": len(services)
+                        "cascade_depth": len(services),
+                        "source": "rule_based"
                     }
                 )
                 findings.append(finding)
@@ -247,3 +360,22 @@ class LogAnalyzerAgent(BaseAgent):
         steps.append("Review affected services for recent deployments")
 
         return steps
+
+    def _format_logs_for_llm(self, logs: List[Dict]) -> str:
+        """Format logs for LLM prompt"""
+        formatted = []
+        for log in logs:
+            formatted.append(
+                f"{log.get('timestamp', 'N/A')} [{log.get('level', 'INFO')}] "
+                f"{log.get('service', 'unknown')}: {log.get('message', '')}"
+            )
+        return "\n".join(formatted)
+
+    def _format_findings_for_llm(self, findings: List[Finding]) -> str:
+        """Format findings for LLM prompt"""
+        formatted = []
+        for i, f in enumerate(findings, 1):
+            formatted.append(
+                f"{i}. [{f.severity}] {f.description} (confidence: {f.confidence.value})"
+            )
+        return "\n".join(formatted)

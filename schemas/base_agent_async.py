@@ -44,18 +44,25 @@ class AsyncBaseAgent(BaseAgent):
 
         Returns:
             BaseAgentOutput with findings and analysis results
+
+        Raises:
+            RuntimeError: If called from within a running event loop
         """
         try:
             # Try to get existing event loop
             loop = asyncio.get_event_loop()
             if loop.is_running():
-                # If loop is already running, create task
-                # This is for nested async calls
-                return asyncio.create_task(self.execute_async(input_data))
+                # Cannot run synchronously from within running loop
+                raise RuntimeError(
+                    "Cannot call execute() from within a running event loop. "
+                    "Use 'await execute_async(input_data)' instead, or call from synchronous context."
+                )
             else:
                 # Run in existing loop
                 return loop.run_until_complete(self.execute_async(input_data))
-        except RuntimeError:
+        except RuntimeError as e:
+            if "running event loop" in str(e):
+                raise
             # No event loop, create new one
             return asyncio.run(self.execute_async(input_data))
 
