@@ -1,10 +1,11 @@
 """
-FastAPI server for ADAPT-Agents v3.3
+FastAPI server for ADAPT-Agents v3.4
 Provides REST API for agent execution with:
 - AsyncAgentOrchestrator (parallel execution)
 - WebSocket support for real-time streaming
 - Webhook callbacks for external integrations
 - RAG & Historical Learning (ChromaDB + sentence-transformers)
+- Enterprise integrations (Slack, JIRA, PagerDuty)
 - API key authentication
 - Rate limiting
 - Request ID tracking
@@ -52,6 +53,13 @@ try:
     KNOWLEDGE_BASE_AVAILABLE = True
 except ImportError:
     KNOWLEDGE_BASE_AVAILABLE = False
+
+# Import Integrations routes
+try:
+    from api.integrations_routes import router as integrations_router
+    INTEGRATIONS_AVAILABLE = True
+except ImportError:
+    INTEGRATIONS_AVAILABLE = False
 
 
 # === Configuration ===
@@ -216,6 +224,10 @@ if WEBHOOK_AVAILABLE:
 # Include Knowledge Base routes
 if KNOWLEDGE_BASE_AVAILABLE:
     app.include_router(knowledge_base_router, prefix="/api/v1", tags=["knowledge-base"])
+
+# Include Integrations routes
+if INTEGRATIONS_AVAILABLE:
+    app.include_router(integrations_router, prefix="/api/v1", tags=["integrations"])
 
 # === Middleware ===
 
@@ -432,14 +444,21 @@ async def root(request: Request):
         endpoints["knowledge_base"] = "/api/v1/knowledge-base"
         endpoints["similarity_search"] = "/api/v1/knowledge-base/search/similar-incidents"
 
+    if INTEGRATIONS_AVAILABLE:
+        endpoints["integrations"] = "/api/v1/integrations"
+        endpoints["slack_integration"] = "/api/v1/integrations/slack"
+        endpoints["jira_integration"] = "/api/v1/integrations/jira"
+        endpoints["pagerduty_integration"] = "/api/v1/integrations/pagerduty"
+
     return {
         "name": "ADAPT-Agents API",
-        "version": "3.3.0",
+        "version": "3.4.0",
         "features": [
             "Async/Await execution",
             "Real-time WebSocket streaming" if WEBSOCKET_AVAILABLE else "WebSocket support (install websockets)",
             "Webhook callbacks" if WEBHOOK_AVAILABLE else "Webhook support (install httpx)",
             "RAG & Historical Learning (ChromaDB)" if KNOWLEDGE_BASE_AVAILABLE else "RAG support (install chromadb, sentence-transformers)",
+            "Enterprise Integrations (Slack, JIRA, PagerDuty)" if INTEGRATIONS_AVAILABLE else "Integrations available",
             "LLM integration (OpenAI/Anthropic)",
             "PII filtering",
             "Result caching",
