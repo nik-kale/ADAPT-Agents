@@ -1,7 +1,8 @@
 """
-FastAPI server for ADAPT-Agents v3.0
+FastAPI server for ADAPT-Agents v3.2
 Provides REST API for agent execution with:
 - AsyncAgentOrchestrator (parallel execution)
+- WebSocket support for real-time streaming
 - API key authentication
 - Rate limiting
 - Request ID tracking
@@ -26,6 +27,22 @@ import sys
 from datetime import datetime
 from collections import defaultdict
 from contextlib import asynccontextmanager
+
+# Import WebSocket routes
+try:
+    from api.websocket_routes import router as websocket_router
+    from api.websocket_manager import manager as ws_manager
+    WEBSOCKET_AVAILABLE = True
+except ImportError:
+    WEBSOCKET_AVAILABLE = False
+
+# Import Webhook routes
+try:
+    from api.webhook_routes import router as webhook_router
+    from api.webhook_manager import webhook_manager
+    WEBHOOK_AVAILABLE = True
+except ImportError:
+    WEBHOOK_AVAILABLE = False
 
 
 # === Configuration ===
@@ -172,13 +189,20 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="ADAPT-Agents API",
-    description="REST API for modular diagnostic agents with async execution, authentication, and rate limiting",
-    version="3.0.0",
+    description="REST API for modular diagnostic agents with async execution, real-time streaming, authentication, and rate limiting",
+    version="3.2.0",
     docs_url="/docs",
     redoc_url="/redoc",
     lifespan=lifespan
 )
 
+# Include WebSocket routes
+if WEBSOCKET_AVAILABLE:
+    app.include_router(websocket_router, tags=["websockets"])
+
+# Include Webhook routes
+if WEBHOOK_AVAILABLE:
+    app.include_router(webhook_router, prefix="/api/v1", tags=["webhooks"])
 
 # === Middleware ===
 
@@ -373,11 +397,27 @@ class AgentExecutionRequest(BaseModel):
 @app.get("/")
 async def root(request: Request):
     """Root endpoint"""
+    endpoints = {
+        "analyze": "/analyze",
+        "agent": "/agents/{agent_name}/execute",
+        "status": "/analyze/{analysis_id}",
+        "agents": "/agents",
+        "health": "/health",
+        "stats": "/stats",
+        "metrics": "Prometheus metrics on port 9090 (if enabled)"
+    }
+
+    if WEBSOCKET_AVAILABLE:
+        endpoints["websocket_analysis"] = "ws://host/ws/analysis/{analysis_id}"
+        endpoints["websocket_broadcast"] = "ws://host/ws/broadcast"
+        endpoints["websocket_agent"] = "ws://host/ws/agent/{agent_name}"
+
     return {
         "name": "ADAPT-Agents API",
-        "version": "3.0.0",
+        "version": "3.2.0",
         "features": [
             "Async/Await execution",
+            "Real-time WebSocket streaming" if WEBSOCKET_AVAILABLE else "WebSocket support (install websockets)",
             "LLM integration (OpenAI/Anthropic)",
             "PII filtering",
             "Result caching",
@@ -387,14 +427,7 @@ async def root(request: Request):
             "Request tracking",
             "Database persistence"
         ],
-        "endpoints": {
-            "analyze": "/analyze",
-            "agent": "/agents/{agent_name}/execute",
-            "status": "/analyze/{analysis_id}",
-            "agents": "/agents",
-            "health": "/health",
-            "metrics": "Prometheus metrics on port 9090 (if enabled)"
-        },
+        "endpoints": endpoints,
         "request_id": request.state.request_id
     }
 
@@ -610,20 +643,29 @@ async def run_analysis(
     use_llm: bool = False,
     filter_pii: bool = False
 ):
-    """Run analysis in background using AsyncAgentOrchestrator"""
+    """Run analysis in background using AsyncAgentOrchestrator with optional streaming"""
     try:
         # Update status
         db.update_analysis_status(analysis_id, "running")
 
-        # Import AsyncAgentOrchestrator
-        from chains.async_orchestrator import AsyncAgentOrchestrator
+        # Use StreamingOrchestrator if WebSocket available, otherwise standard AsyncAgentOrchestrator
+        if WEBSOCKET_AVAILABLE:
+            from chains.streaming_orchestrator import StreamingOrchestrator
+            orchestrator = StreamingOrchestrator(
+                websocket_manager=ws_manager,
+                analysis_id=analysis_id,
+                error_strategy="continue",
+                use_llm=use_llm,
+                filter_pii=filter_pii
+            )
+        else:
+            from chains.async_orchestrator import AsyncAgentOrchestrator
+            orchestrator = AsyncAgentOrchestrator(
+                error_strategy="continue",
+                use_llm=use_llm,
+                filter_pii=filter_pii
+            )
 
-        # Execute with async orchestrator
-        orchestrator = AsyncAgentOrchestrator(
-            error_strategy="continue",
-            use_llm=use_llm,
-            filter_pii=filter_pii
-        )
         results = await orchestrator.execute_rca_chain(incident_data)
 
         # Store results
