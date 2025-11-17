@@ -1,11 +1,12 @@
 """
-FastAPI server for ADAPT-Agents v3.4
+FastAPI server for ADAPT-Agents v3.5
 Provides REST API for agent execution with:
 - AsyncAgentOrchestrator (parallel execution)
 - WebSocket support for real-time streaming
 - Webhook callbacks for external integrations
 - RAG & Historical Learning (ChromaDB + sentence-transformers)
 - Enterprise integrations (Slack, JIRA, PagerDuty)
+- Interactive visualizations (root cause graphs, timelines, dashboards)
 - API key authentication
 - Rate limiting
 - Request ID tracking
@@ -60,6 +61,13 @@ try:
     INTEGRATIONS_AVAILABLE = True
 except ImportError:
     INTEGRATIONS_AVAILABLE = False
+
+# Import Visualization routes
+try:
+    from api.visualization_routes import router as visualization_router
+    VISUALIZATION_AVAILABLE = True
+except ImportError:
+    VISUALIZATION_AVAILABLE = False
 
 
 # === Configuration ===
@@ -228,6 +236,10 @@ if KNOWLEDGE_BASE_AVAILABLE:
 # Include Integrations routes
 if INTEGRATIONS_AVAILABLE:
     app.include_router(integrations_router, prefix="/api/v1", tags=["integrations"])
+
+# Include Visualization routes
+if VISUALIZATION_AVAILABLE:
+    app.include_router(visualization_router, prefix="/api/v1", tags=["visualizations"])
 
 # === Middleware ===
 
@@ -450,15 +462,23 @@ async def root(request: Request):
         endpoints["jira_integration"] = "/api/v1/integrations/jira"
         endpoints["pagerduty_integration"] = "/api/v1/integrations/pagerduty"
 
+    if VISUALIZATION_AVAILABLE:
+        endpoints["visualizations"] = "/api/v1/visualizations"
+        endpoints["root_cause_graph"] = "/api/v1/visualizations/root-cause-graph"
+        endpoints["timeline"] = "/api/v1/visualizations/timeline"
+        endpoints["metrics_dashboard"] = "/api/v1/visualizations/metrics-dashboard"
+        endpoints["complete_dashboard"] = "/api/v1/visualizations/complete-dashboard"
+
     return {
         "name": "ADAPT-Agents API",
-        "version": "3.4.0",
+        "version": "3.5.0",
         "features": [
             "Async/Await execution",
             "Real-time WebSocket streaming" if WEBSOCKET_AVAILABLE else "WebSocket support (install websockets)",
             "Webhook callbacks" if WEBHOOK_AVAILABLE else "Webhook support (install httpx)",
             "RAG & Historical Learning (ChromaDB)" if KNOWLEDGE_BASE_AVAILABLE else "RAG support (install chromadb, sentence-transformers)",
             "Enterprise Integrations (Slack, JIRA, PagerDuty)" if INTEGRATIONS_AVAILABLE else "Integrations available",
+            "Interactive Visualizations (Graphs, Timelines, Dashboards)" if VISUALIZATION_AVAILABLE else "Visualizations available (install networkx)",
             "LLM integration (OpenAI/Anthropic)",
             "PII filtering",
             "Result caching",
