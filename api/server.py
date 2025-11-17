@@ -1,8 +1,10 @@
 """
-FastAPI server for ADAPT-Agents v3.2
+FastAPI server for ADAPT-Agents v3.3
 Provides REST API for agent execution with:
 - AsyncAgentOrchestrator (parallel execution)
 - WebSocket support for real-time streaming
+- Webhook callbacks for external integrations
+- RAG & Historical Learning (ChromaDB + sentence-transformers)
 - API key authentication
 - Rate limiting
 - Request ID tracking
@@ -43,6 +45,13 @@ try:
     WEBHOOK_AVAILABLE = True
 except ImportError:
     WEBHOOK_AVAILABLE = False
+
+# Import Knowledge Base routes
+try:
+    from api.knowledge_base_routes import router as knowledge_base_router
+    KNOWLEDGE_BASE_AVAILABLE = True
+except ImportError:
+    KNOWLEDGE_BASE_AVAILABLE = False
 
 
 # === Configuration ===
@@ -203,6 +212,10 @@ if WEBSOCKET_AVAILABLE:
 # Include Webhook routes
 if WEBHOOK_AVAILABLE:
     app.include_router(webhook_router, prefix="/api/v1", tags=["webhooks"])
+
+# Include Knowledge Base routes
+if KNOWLEDGE_BASE_AVAILABLE:
+    app.include_router(knowledge_base_router, prefix="/api/v1", tags=["knowledge-base"])
 
 # === Middleware ===
 
@@ -412,12 +425,21 @@ async def root(request: Request):
         endpoints["websocket_broadcast"] = "ws://host/ws/broadcast"
         endpoints["websocket_agent"] = "ws://host/ws/agent/{agent_name}"
 
+    if WEBHOOK_AVAILABLE:
+        endpoints["webhooks"] = "/api/v1/webhooks"
+
+    if KNOWLEDGE_BASE_AVAILABLE:
+        endpoints["knowledge_base"] = "/api/v1/knowledge-base"
+        endpoints["similarity_search"] = "/api/v1/knowledge-base/search/similar-incidents"
+
     return {
         "name": "ADAPT-Agents API",
-        "version": "3.2.0",
+        "version": "3.3.0",
         "features": [
             "Async/Await execution",
             "Real-time WebSocket streaming" if WEBSOCKET_AVAILABLE else "WebSocket support (install websockets)",
+            "Webhook callbacks" if WEBHOOK_AVAILABLE else "Webhook support (install httpx)",
+            "RAG & Historical Learning (ChromaDB)" if KNOWLEDGE_BASE_AVAILABLE else "RAG support (install chromadb, sentence-transformers)",
             "LLM integration (OpenAI/Anthropic)",
             "PII filtering",
             "Result caching",
@@ -672,6 +694,14 @@ async def run_analysis(
         serialized_results = _serialize_results(results)
         db.update_analysis_status(analysis_id, "completed", serialized_results)
 
+        # Store in knowledge base for RAG (if available and successful)
+        if KNOWLEDGE_BASE_AVAILABLE and results.get("success", False):
+            try:
+                await _store_in_knowledge_base(analysis_id, incident_data, results)
+            except Exception as e:
+                # Log error but don't fail the analysis
+                print(f"⚠️  Failed to store in knowledge base: {e}")
+
         # Save agent execution metrics
         for phase, phase_results in results.items():
             if isinstance(phase_results, dict):
@@ -729,6 +759,69 @@ async def _send_callback(url: str, analysis_id: str, results: Dict):
     except Exception:
         # Log but don't fail
         pass
+
+
+async def _store_in_knowledge_base(analysis_id: str, incident_data: Dict, rca_results: Dict):
+    """
+    Store successful RCA results in knowledge base for future similarity search
+
+    This enables RAG (Retrieval-Augmented Generation) by learning from past incidents
+    """
+    try:
+        from api.knowledge_base_routes import get_rag_components
+        import uuid
+
+        components = get_rag_components()
+        vector_db = components["vector_db"]
+        embedding_service = components["embedding_service"]
+
+        # Generate embeddings for the incident
+        embed_result = embedding_service.embed_incident(incident_data)
+
+        # Prepare metadata
+        metadata = {
+            "incident_time": incident_data.get("incident_time", ""),
+            "affected_services": incident_data.get("affected_services", []),
+            "severity": incident_data.get("severity", "unknown"),
+            "status": "resolved"
+        }
+
+        # Store in vector database
+        vector_db.add_incident(
+            incident_id=analysis_id,
+            incident_summary=embed_result["incident_summary"],
+            embedding=embed_result["incident_embedding"],
+            metadata=metadata,
+            rca_results=rca_results
+        )
+
+        # Also store top findings
+        if "phase2" in rca_results and "hypothesis_generator" in rca_results["phase2"]:
+            hyp = rca_results["phase2"]["hypothesis_generator"]
+            if hasattr(hyp, "findings") and hyp.findings:
+                for finding in hyp.findings[:3]:  # Top 3 hypotheses
+                    finding_dict = finding.dict() if hasattr(finding, "dict") else finding
+                    finding_embed = embedding_service.embed_finding(finding_dict)
+
+                    vector_db.add_finding(
+                        finding_id=str(uuid.uuid4()),
+                        finding_text=finding_embed["finding_text"],
+                        embedding=finding_embed["finding_embedding"],
+                        metadata={
+                            "agent_name": "HypothesisGeneratorAgent",
+                            "incident_id": analysis_id,
+                            "severity": finding_dict.get("severity", "unknown"),
+                            "type": "hypothesis",
+                            "timestamp": datetime.utcnow().isoformat()
+                        }
+                    )
+
+        print(f"✓ Stored incident {analysis_id} in knowledge base for RAG")
+
+    except Exception as e:
+        # Don't fail the analysis, just log
+        print(f"⚠️  Knowledge base storage failed: {e}")
+        raise
 
 
 # === Graceful Shutdown Handler ===
