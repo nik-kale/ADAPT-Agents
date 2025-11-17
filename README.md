@@ -1,456 +1,619 @@
-# ADAPT-Agents: Modular Diagnostic Agents Library
+# ADAPT-Agents: Enterprise-Grade AI-Powered RCA Platform
 
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Tests](https://img.shields.io/badge/tests-passing-brightgreen.svg)](tests/)
 [![Coverage](https://img.shields.io/badge/coverage-80%25-green.svg)](tests/)
-[![Version](https://img.shields.io/badge/version-2.0.0-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-3.5.0-blue.svg)](CHANGELOG.md)
 
-A production-grade library of specialized LLM agents for automated troubleshooting, anomaly analysis, and root cause analysis (RCA) workflows.
+**Production-ready AI agents for automated incident analysis, root cause detection, and intelligent remediation.**
 
-## 🚀 What's New in v2.0
+ADAPT-Agents is an open-source alternative to DataDog, Grafana, and PagerDuty's RCA capabilities, offering real-time streaming, RAG-powered learning, enterprise integrations, and interactive visualizations—all at zero cost.
 
-**Major upgrade with enterprise features and production readiness!**
+---
 
-- ⚡ **Async/Await Support** - 3-5x performance improvement
-- 🤖 **LLM Integration** - OpenAI, Anthropic, and custom providers
-- 💾 **Caching System** - Redis/Memory for cost optimization
-- 🌐 **REST API** - FastAPI server with OpenAPI docs
-- 🖥️ **CLI Tool** - Full-featured command-line interface
-- 📊 **Monitoring** - Prometheus metrics + OpenTelemetry tracing
-- 🔒 **Security** - PII filtering and audit logging
-- 🐳 **Docker** - Complete deployment stack
-- ✅ **Testing** - 80%+ test coverage
-- 📚 **Docs** - Comprehensive MkDocs documentation
+## 🚀 What's New in v3.5
 
-[See full changelog](CHANGELOG.md) | [Upgrade from v1.0](V2_UPGRADE_GUIDE.md)
+**Enterprise features that rival commercial observability platforms:**
 
-## Overview
+### ✨ **Core Capabilities**
+- ⚡ **Async/Await Architecture** - 3-5x faster parallel execution
+- 🧠 **RAG & Historical Learning** - Learn from every incident with ChromaDB + sentence-transformers
+- 🔄 **Real-Time Streaming** - WebSocket-based live updates during analysis
+- 🔗 **Enterprise Integrations** - Native Slack, JIRA, PagerDuty connectors
+- 📊 **Interactive Visualizations** - Root cause graphs, timelines, metrics dashboards
+- 🎯 **Intelligent Agents** - 6 specialized AI agents with LLM integration
 
-ADAPT-Agents provides a modular, composable set of intelligent diagnostic components for building production-grade agentic systems. Each agent follows a consistent schema with structured inputs/outputs and is designed to work both independently and as part of orchestrated chains.
+### 🏢 **Enterprise Features**
+- 📡 **Webhook Management** - Event-driven callbacks with delivery tracking
+- 🗄️ **Vector Database** - Semantic search for similar historical incidents
+- 🔐 **API Authentication** - API key auth + rate limiting + request tracking
+- 💾 **Persistent Storage** - SQLite backend for analyses, webhooks, integrations
+- 🎨 **Multi-Format Export** - Cytoscape.js, D3.js, Plotly, Chart.js, GraphML, DOT
 
-### Key Features
+### 📈 **Competitive Positioning**
 
-- **6 Specialized Agents**: Log analysis, metrics analysis, change correlation, topology inference, hypothesis generation, and remediation planning
-- **Async Execution**: Full async/await support for non-blocking parallel execution
-- **LLM Integration**: Pluggable providers (OpenAI, Anthropic) with structured output
-- **Caching**: Multi-backend caching (Memory, Redis) for performance and cost savings
-- **REST API**: Production-ready FastAPI server with async processing
-- **CLI**: Command-line interface for analysis, testing, and deployment
-- **Observability**: Structured logging, Prometheus metrics, OpenTelemetry tracing
-- **Security**: PII filtering, audit logging, secure configuration
-- **Testing**: Comprehensive test suite with 80%+ coverage
-- **Docker**: Full stack deployment with Prometheus, Grafana, Redis, Jaeger
-- **Framework Agnostic**: Compatible with ADAPT-RCA, ADAPT-UI, and custom workflows
+| Feature | DataDog | Grafana | PagerDuty | **ADAPT-Agents** |
+|---------|---------|---------|-----------|------------------|
+| Real-Time Streaming | ✓ | ✓ | ✓ | ✅ |
+| RAG/AI Learning | ❌ | ❌ | ❌ | ✅ |
+| Slack/JIRA/PagerDuty | ✓ | ✓ | Native | ✅ |
+| Interactive Viz | ✓ | ✓ | ✓ | ✅ |
+| **Open Source** | ❌ | ✓ | ❌ | ✅ |
+| **Monthly Cost** | $15-31/host | Free | $21-51/user | **$0** |
 
-## Quick Start
+**Result:** Enterprise-grade RCA platform at zero cost, with unique AI learning capabilities.
 
-### Installation
+---
 
-**Option 1: Install from source (recommended for development)**
+## 📦 Installation
 
+### Quick Start (Docker)
 ```bash
 # Clone repository
 git clone https://github.com/yourusername/ADAPT-Agents.git
 cd ADAPT-Agents
 
-# Install with all features
-pip install -e ".[full]"
-
-# Or install specific features
-pip install -e ".[api,llm,monitoring]"
-```
-
-**Option 2: Install with pip (coming soon)**
-
-```bash
-# Basic installation
-pip install adapt-agents
-
-# With all features
-pip install "adapt-agents[full]"
-```
-
-**Option 3: Docker**
-
-```bash
-# Run with Docker Compose (includes Redis, Prometheus, Grafana)
+# Start complete stack (API + Redis + Prometheus + Grafana)
 docker-compose up -d
 
 # Access:
-# - API: http://localhost:8000
+# - API & Docs: http://localhost:8000/docs
 # - Metrics: http://localhost:9090
 # - Grafana: http://localhost:3000
 ```
 
-### Configuration
-
+### Python Installation
 ```bash
-# Create .env file from template
+# Install all features
+pip install -r requirements.txt
+
+# Or install selectively
+pip install fastapi uvicorn httpx websockets  # Core API
+pip install chromadb sentence-transformers    # RAG features
+pip install networkx                           # Visualizations
+pip install openai anthropic                   # LLM providers
+```
+
+### Configuration
+```bash
+# Create .env file
 cp .env.example .env
 
-# Edit configuration (required for LLM features)
-vim .env
-
-# Minimum config
-ADAPT_LLM_PROVIDER=openai
-ADAPT_LLM_API_KEY=your-api-key-here
+# Configure LLM provider (required for AI features)
+echo "ADAPT_LLM_PROVIDER=openai" >> .env
+echo "ADAPT_LLM_API_KEY=sk-..." >> .env
 ```
 
-### Run Example
+---
 
+## 🎯 Quick Start Examples
+
+### 1️⃣ Run Complete RCA Analysis
 ```bash
-python examples/example_rca_chain.py
+# Analyze incident using CLI
+python -m cli.main analyze examples/incident_data.json
+
+# Output: Root cause + remediation plan in seconds
 ```
 
-This runs a complete RCA workflow using synthetic data for a memory leak incident.
+### 2️⃣ Start API Server
+```bash
+# Start FastAPI server
+uvicorn api.server:app --reload
 
-### Expected Output
-
-```
-ADAPT-Agents: Complete RCA Chain Example
-================================================================================
-Scenario: Memory leak after deployment
-================================================================================
-
-Incident: Payment service experiencing OutOfMemoryErrors and degraded performance
-Time: 2024-01-15T14:23:00Z
-Affected Services: payment-service
-Data: 60 logs, 5 metrics, 2 changes
-
-Executing RCA chain...
-
-Phase 1: Running diagnostic agents in parallel...
-Phase 1 complete: 4/4 agents succeeded
-
-Phase 2: Generating hypotheses...
-Generated 2 hypotheses
-
-Phase 3: Creating remediation plan...
-Generated 3 remediation plans
-
-RCA Chain complete in 89ms
-
-================================================================================
-RCA CHAIN EXECUTION RESULTS
-================================================================================
-
-[Phase 1: Diagnostic Analysis]
-  ✓ log_analysis: Analyzed 60 logs. Found 2 issues: 1 critical, 1 high severity.
-    Findings: 2
-  ✓ metrics_analysis: Analyzed 5 metrics. Found 2 anomalies, 1 threshold violations, 0 correlations.
-    Findings: 3
-  ✓ change_correlation: Analyzed 2 changes. Found 1 correlations, 1 high-risk.
-    Findings: 1
-  ✓ topology: Discovered 3 services and 2 dependencies. Found 0 topology insights.
-    Findings: 0
-
-[Phase 2: Hypothesis Generation]
-  ✓ Generated 2 root cause hypotheses. Top hypothesis score: 92/100. Validation tests provided.
-    1. Recent deployment introduced memory leak causing resource exhaustion and failures
-       Score: 92/100
-    2. Recent deployment introduced errors or breaking changes
-       Score: 65/100
-
-[Phase 3: Remediation Planning]
-  ✓ Generated 3 remediation plans: 1 immediate, 2 longer-term. Execute in priority order.
-    Plan 1: Rollback deployment to previous stable version
-    Type: immediate
-    Est. Time: 12 minutes
-================================================================================
+# Access interactive docs at http://localhost:8000/docs
 ```
 
-## Architecture
+### 3️⃣ Analyze Incident via API
+```bash
+# Create analysis (returns immediately with job ID)
+curl -X POST http://localhost:8000/analyze \
+  -H "X-API-Key: demo-key-12345" \
+  -H "Content-Type: application/json" \
+  -d @examples/incident_data.json
 
-```
-┌─────────────────────────────────────────┐
-│        Agent Orchestrator                │
-└─────────┬───────────────────────────────┘
-          │
-  ┌───────┼───────┬──────────┐
-  │       │       │          │
-  v       v       v          v
-┌────┐ ┌────┐ ┌────┐    ┌────┐
-│Log │ │Metr│ │Chng│    │Topo│  Phase 1: Analysis
-│Anlz│ │Anlz│ │Corr│    │Infe│  (Parallel)
-└──┬─┘ └──┬─┘ └──┬─┘    └──┬─┘
-   │      │      │         │
-   └──────┴──────┴─────────┘
-            │
-            v
-       ┌────────┐
-       │Hypoths │              Phase 2: Synthesis
-       │Genrtor │              (Sequential)
-       └────┬───┘
-            │
-            v
-       ┌────────┐
-       │Remedtn │              Phase 3: Planning
-       │Plannr  │              (Sequential)
-       └────────┘
+# Get results
+curl http://localhost:8000/analyze/{analysis_id} \
+  -H "X-API-Key: demo-key-12345"
 ```
 
-## Agent Catalog
+### 4️⃣ Real-Time Streaming (WebSocket)
+```javascript
+// Connect to WebSocket for live updates
+const ws = new WebSocket('ws://localhost:8000/ws/analysis/{analysis_id}');
 
-| Agent | Purpose | Input | Output |
-|-------|---------|-------|--------|
-| **LogAnalyzerAgent** | Error pattern detection | Logs | Error patterns, cascades |
-| **MetricsAnalyzerAgent** | Anomaly detection | Time-series metrics | Anomalies, correlations |
-| **ChangeCorrelatorAgent** | Change-incident correlation | Change events | High-risk changes |
-| **TopologyInferenceAgent** | Dependency mapping | Traces, logs | Service topology |
-| **HypothesisGeneratorAgent** | Root cause synthesis | All findings | Ranked hypotheses |
-| **RemediationPlannerAgent** | Action planning | Hypotheses | Remediation plans |
+ws.onmessage = (event) => {
+  const update = JSON.parse(event.data);
+  console.log(`[${update.agent_name}] ${update.status}: ${update.message}`);
+};
+```
 
-## Usage Examples
+### 5️⃣ Enterprise Integrations
+```bash
+# Configure Slack integration
+curl -X POST http://localhost:8000/api/v1/integrations/slack \
+  -H "X-API-Key: demo-key-12345" \
+  -d '{"webhook_url": "https://hooks.slack.com/services/..."}'
 
-### Individual Agent
+# Send incident alert to Slack
+curl -X POST http://localhost:8000/api/v1/integrations/notify/incident \
+  -H "X-API-Key: demo-key-12345" \
+  -d '{
+    "incident_id": "inc-123",
+    "incident_data": {...},
+    "slack_channel": "#incidents",
+    "create_jira": true,
+    "trigger_pagerduty": true
+  }'
+```
 
+### 6️⃣ Interactive Visualizations
+```bash
+# Generate root cause dependency graph
+curl -X POST http://localhost:8000/api/v1/visualizations/root-cause-graph \
+  -H "X-API-Key: demo-key-12345" \
+  -d '{"rca_results": {...}, "format": "cytoscape"}'
+
+# Generate complete dashboard (all visualizations)
+curl -X POST http://localhost:8000/api/v1/visualizations/complete-dashboard \
+  -H "X-API-Key: demo-key-12345" \
+  -d '{"incident_data": {...}, "rca_results": {...}}'
+```
+
+### 7️⃣ RAG-Powered Similarity Search
+```bash
+# Store incident in knowledge base (automatic after each analysis)
+# Search for similar past incidents
+curl -X POST http://localhost:8000/api/v1/knowledge-base/search/similar-incidents \
+  -H "X-API-Key: demo-key-12345" \
+  -d '{
+    "incident_data": {...},
+    "n_results": 5,
+    "similarity_threshold": 0.7
+  }'
+
+# Get insights about recurring patterns
+curl http://localhost:8000/api/v1/knowledge-base/incidents/{id}/insights \
+  -H "X-API-Key: demo-key-12345"
+```
+
+---
+
+## 🏗️ Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                     ADAPT-Agents v3.5 Platform                  │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐         │
+│  │  WebSockets  │  │   Webhooks   │  │  REST API    │         │
+│  │  (Real-Time) │  │  (Callbacks) │  │  (FastAPI)   │         │
+│  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘         │
+│         │                 │                  │                  │
+│         └─────────────────┴──────────────────┘                  │
+│                           │                                     │
+│  ┌────────────────────────┴────────────────────────┐           │
+│  │         Integration Layer                        │           │
+│  │  ┌─────────┐  ┌─────────┐  ┌──────────────┐   │           │
+│  │  │  Slack  │  │  JIRA   │  │  PagerDuty   │   │           │
+│  │  └─────────┘  └─────────┘  └──────────────┘   │           │
+│  └──────────────────────────────────────────────────┘           │
+│                           │                                     │
+│  ┌────────────────────────┴────────────────────────┐           │
+│  │      Streaming Agent Orchestrator                │           │
+│  │  ┌───────────────────────────────────────────┐  │           │
+│  │  │  Phase 1: Parallel Diagnostic Agents      │  │           │
+│  │  │  [Log] [Metrics] [Changes] [Topology]     │  │           │
+│  │  └───────────────┬───────────────────────────┘  │           │
+│  │                  │                               │           │
+│  │  ┌───────────────┴───────────────────────────┐  │           │
+│  │  │  Phase 2: Hypothesis Generation (RAG)     │  │           │
+│  │  │  [Similar Incidents] → [LLM] → [Hypoths]  │  │           │
+│  │  └───────────────┬───────────────────────────┘  │           │
+│  │                  │                               │           │
+│  │  ┌───────────────┴───────────────────────────┐  │           │
+│  │  │  Phase 3: Remediation Planning (RAG)      │  │           │
+│  │  │  [Past Solutions] → [LLM] → [Actions]     │  │           │
+│  │  └───────────────────────────────────────────┘  │           │
+│  └──────────────────────────────────────────────────┘           │
+│                           │                                     │
+│  ┌────────────────────────┴────────────────────────┐           │
+│  │         Intelligence Layer                       │           │
+│  │  ┌──────────────┐  ┌──────────────────────┐    │           │
+│  │  │  ChromaDB    │  │  sentence-transformers │    │           │
+│  │  │  (Vectors)   │  │  (Embeddings)          │    │           │
+│  │  └──────────────┘  └──────────────────────┘    │           │
+│  └──────────────────────────────────────────────────┘           │
+│                           │                                     │
+│  ┌────────────────────────┴────────────────────────┐           │
+│  │         Visualization Layer                      │           │
+│  │  [Graphs] [Timelines] [Dashboards] [Metrics]   │           │
+│  │  → Cytoscape, D3.js, Plotly, Chart.js          │           │
+│  └──────────────────────────────────────────────────┘           │
+│                           │                                     │
+│  ┌────────────────────────┴────────────────────────┐           │
+│  │         Persistence Layer                        │           │
+│  │  [SQLite] [Redis Cache] [Vector DB]            │           │
+│  └──────────────────────────────────────────────────┘           │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 🤖 AI Agent Catalog
+
+| Agent | Purpose | LLM-Powered | Capabilities |
+|-------|---------|-------------|--------------|
+| **LogAnalyzerAgent** | Error pattern detection | ✓ | Pattern matching, cascade detection, severity scoring |
+| **MetricsAnalyzerAgent** | Anomaly detection | ✓ | Statistical analysis, threshold violations, correlations |
+| **ChangeCorrelatorAgent** | Change-incident correlation | ✓ | Temporal correlation, risk scoring, deployment analysis |
+| **TopologyInferenceAgent** | Service dependency mapping | ✓ | Dependency graphs, impact analysis, blast radius |
+| **HypothesisGeneratorAgent** | Root cause synthesis | ✓ | Multi-agent fusion, RAG enhancement, confidence scoring |
+| **RemediationPlannerAgent** | Action planning | ✓ | Prioritization, time estimation, validation tests |
+
+**All agents support:**
+- Async/await execution
+- Result caching (Redis/Memory)
+- Structured output (Pydantic models)
+- RAG enhancement with historical context
+- PII filtering for sensitive data
+- Prometheus metrics tracking
+
+---
+
+## 📡 API Endpoints
+
+### Core Analysis
+- `POST /analyze` - Start RCA analysis (async)
+- `GET /analyze/{id}` - Get analysis results
+- `GET /agents` - List all available agents
+- `POST /agents/{name}/execute` - Run specific agent
+
+### Real-Time Streaming (WebSocket)
+- `ws://host/ws/analysis/{id}` - Live updates for specific analysis
+- `ws://host/ws/broadcast` - System-wide event stream
+- `ws://host/ws/agent/{name}` - Agent-specific updates
+
+### Webhooks
+- `POST /api/v1/webhooks` - Create webhook subscription
+- `GET /api/v1/webhooks` - List webhooks
+- `DELETE /api/v1/webhooks/{id}` - Delete webhook
+- `GET /api/v1/webhooks/{id}/deliveries` - Delivery history
+
+### Knowledge Base (RAG)
+- `POST /api/v1/knowledge-base/incidents` - Store incident
+- `POST /api/v1/knowledge-base/search/similar-incidents` - Find similar incidents
+- `GET /api/v1/knowledge-base/incidents/{id}/insights` - Get insights
+- `GET /api/v1/knowledge-base/stats` - Database statistics
+
+### Integrations
+- `POST /api/v1/integrations/slack` - Configure Slack
+- `POST /api/v1/integrations/jira` - Configure JIRA
+- `POST /api/v1/integrations/pagerduty` - Configure PagerDuty
+- `POST /api/v1/integrations/notify/incident` - Send alerts
+- `POST /api/v1/integrations/notify/rca-complete` - Send RCA summary
+
+### Visualizations
+- `POST /api/v1/visualizations/root-cause-graph` - Generate dependency graph
+- `POST /api/v1/visualizations/timeline` - Generate incident timeline
+- `POST /api/v1/visualizations/metrics-dashboard` - Generate metrics dashboard
+- `POST /api/v1/visualizations/complete-dashboard` - Generate all visualizations
+
+**Full API documentation:** http://localhost:8000/docs
+
+---
+
+## 📊 Feature Showcase
+
+### 1. Real-Time Streaming
 ```python
-from agents import MetricsAnalyzerAgent
-from schemas import BaseAgentInput
+# Server-side: Streaming orchestrator automatically sends updates
+from chains.streaming_orchestrator import StreamingOrchestrator
 
-agent = MetricsAnalyzerAgent()
-
-result = agent.execute(BaseAgentInput(
-    context={
-        "metrics": [
-            {
-                "name": "cpu_usage",
-                "service": "payment-service",
-                "timestamps": ["2024-01-15T14:00:00Z", "2024-01-15T14:01:00Z"],
-                "values": [45, 98],
-                "unit": "percentage"
-            }
-        ],
-        "incident_time": "2024-01-15T14:01:00Z"
-    },
-    parameters={"anomaly_threshold": 3.0}
-))
-
-print(f"Status: {result.status}")
-print(f"Findings: {len(result.findings)}")
-for finding in result.findings:
-    print(f"- {finding.description} (confidence: {finding.confidence})")
-```
-
-### Full RCA Chain
-
-```python
-from chains.orchestrator import AgentOrchestrator
-
-orchestrator = AgentOrchestrator(error_strategy="continue")
-
-incident_data = {
-    "description": "Service experiencing high error rates",
-    "incident_time": "2024-01-15T14:23:00Z",
-    "affected_services": ["payment-service"],
-    "logs": [...],
-    "metrics": [...],
-    "changes": [...],
-    "traces": [...]
-}
-
-results = orchestrator.execute_rca_chain(incident_data)
-
-# Access results
-log_findings = results["phase1_analysis"]["log_analysis"].findings
-hypotheses = results["phase2_hypothesis"].findings
-remediation_plans = results["phase3_remediation"].findings
-
-# Top hypothesis
-if hypotheses:
-    top = hypotheses[0]
-    print(f"Root Cause: {top.description}")
-    print(f"Confidence: {top.confidence}")
-    print(f"Score: {top.metadata['hypothesis_score']}/100")
-```
-
-### Custom Chain
-
-```python
-from agents import LogAnalyzerAgent, MetricsAnalyzerAgent, HypothesisGeneratorAgent
-
-# Phase 1: Run specific agents
-log_agent = LogAnalyzerAgent()
-metrics_agent = MetricsAnalyzerAgent()
-
-log_result = log_agent.execute(log_input)
-metrics_result = metrics_agent.execute(metrics_input)
-
-# Phase 2: Generate hypothesis
-hypothesis_agent = HypothesisGeneratorAgent()
-hypothesis_result = hypothesis_agent.execute(BaseAgentInput(
-    context={
-        "log_findings": log_result.findings,
-        "metrics_findings": metrics_result.findings
-    }
-))
-
-print(f"Generated {len(hypothesis_result.findings)} hypotheses")
-```
-
-## Documentation
-
-- [Getting Started](docs/getting_started.md) - Installation and basic usage
-- [Agents Guide](docs/agents_guide.md) - Detailed guide for each agent
-- [Architecture](docs/architecture.md) - System design and extensibility
-- [Orchestration Patterns](patterns/) - Reusable patterns for agent coordination
-
-## Orchestration Patterns
-
-### Chain-of-Thought Suppression
-Reduces output verbosity while maintaining quality:
-```python
-input_data = BaseAgentInput(
-    context={...},
-    parameters={"suppress_reasoning": True}
+orchestrator = StreamingOrchestrator(
+    websocket_manager=ws_manager,
+    analysis_id=analysis_id
 )
+
+# Automatically streams:
+# - Agent start/complete events
+# - Individual findings as discovered
+# - Phase transitions
+# - Final results
 ```
 
-### Multi-Agent Delegation
-Coordinates multiple agents efficiently:
-- Parallel execution for independent agents
-- Sequential execution for dependent agents
-- Hybrid workflows for complex scenarios
-
-### Hypothesis-Test Loop
-Iterative validation of root cause hypotheses:
-1. Generate hypotheses
-2. Design validation tests
-3. Execute tests
-4. Refine or confirm
-
-### Error Recovery
-Graceful degradation and resilience:
-- Continue with partial results
-- Retry with exponential backoff
-- Circuit breaker for cascading failures
-- Fallback to simpler agents
-
-## Integration
-
-### ADAPT-RCA Integration
+### 2. RAG-Enhanced Analysis
 ```python
-from adapt_rca import RCAWorkflow
-from adapt_agents import AgentOrchestrator
+# Automatic: Every successful analysis is stored in ChromaDB
+# Future analyses get historical context automatically
 
-workflow = RCAWorkflow()
-orchestrator = AgentOrchestrator()
+# Manual similarity search:
+from rag import SimilaritySearchService
 
-# Run agents as part of RCA workflow
-incident = workflow.get_incident(incident_id)
-agent_results = orchestrator.execute_rca_chain(incident.to_dict())
-workflow.record_findings(agent_results)
+similar = similarity_search.find_similar_incidents(
+    query_incident=current_incident,
+    n_results=5,
+    similarity_threshold=0.7
+)
+
+# Returns: Top-5 similar past incidents with RCA solutions
 ```
 
-### ADAPT-UI Integration
+### 3. Enterprise Integrations
 ```python
-# Agent results structured for UI visualization
-results = {
-    "phase1_analysis": {...},  # Agent findings by type
-    "phase2_hypothesis": {...}, # Ranked hypotheses
-    "phase3_remediation": {...} # Actionable plans
-}
+# Configure once, use everywhere
+from integrations import IntegrationManager
 
-# UI can render:
-# - Timeline of findings
-# - Hypothesis comparison
-# - Step-by-step remediation
+manager = IntegrationManager()
+
+# Slack
+manager.register_slack(integration_id, api_key, webhook_url)
+
+# JIRA
+manager.register_jira(integration_id, api_key, jira_url, username, token, project_key)
+
+# PagerDuty
+manager.register_pagerduty(integration_id, api_key, pd_api_key, integration_key)
+
+# Notify all configured integrations
+await manager.notify_incident(incident_id, incident_data, api_key)
 ```
 
-### Custom LLM Backend
+### 4. Interactive Visualizations
 ```python
-class CustomLLMAgent(BaseAgent):
-    def __init__(self):
-        super().__init__("CustomAgent", capabilities)
-        self.llm_client = YourLLMClient()
+# Generate root cause dependency graph
+from visualization import RootCauseGraphGenerator
 
-    def execute(self, input_data):
-        prompt = self.build_prompt(input_data)
-        llm_response = self.llm_client.generate(prompt)
-        return self.parse_response(llm_response)
+graph_gen = RootCauseGraphGenerator()
+graph_data = graph_gen.generate_from_rca(rca_results)
+
+# Export in multiple formats:
+cytoscape_format = graph_data["cytoscape"]  # For web rendering
+d3_format = graph_data["d3"]                # For force-directed graph
+graphml_format = graph_data["graphml"]      # For analysis tools
+dot_format = graph_data["dot"]              # For Graphviz
 ```
 
-## Project Structure
+---
 
+## 📚 Documentation
+
+### Getting Started
+- [Installation Guide](docs/installation.md)
+- [Configuration](docs/configuration.md)
+- [Quick Start Tutorial](docs/quickstart.md)
+
+### Core Features
+- [Agent Guide](docs/agents_guide.md) - Detailed guide for each agent
+- [Orchestration Patterns](docs/orchestration.md) - Chain composition strategies
+- [LLM Integration](docs/llm_integration.md) - Using OpenAI, Anthropic, etc.
+
+### Enterprise Features (v3.2-3.5)
+- [Real-Time Streaming](docs/websockets.md) - WebSocket-based live updates
+- [Webhook Management](docs/webhooks.md) - Event-driven callbacks
+- [RAG & Historical Learning](docs/rag.md) - ChromaDB + semantic search
+- [Enterprise Integrations](docs/integrations.md) - Slack, JIRA, PagerDuty
+- [Interactive Visualizations](docs/visualizations.md) - Graphs, timelines, dashboards
+
+### API Reference
+- [REST API](docs/api_reference.md) - Complete endpoint documentation
+- [WebSocket API](docs/websocket_api.md) - Real-time streaming protocols
+- [Pydantic Models](docs/schemas.md) - Data structures and validation
+
+### Advanced Topics
+- [Architecture](docs/architecture.md) - System design and extensibility
+- [Performance Tuning](docs/performance.md) - Optimization strategies
+- [Security](docs/security.md) - Authentication, PII filtering, audit logs
+- [Deployment](docs/deployment.md) - Docker, Kubernetes, cloud platforms
+
+---
+
+## 🔧 Development
+
+### Project Structure
 ```
 ADAPT-Agents/
-├── agents/               # Agent implementations
-│   ├── log_analyzer_agent.py
-│   ├── metrics_analyzer_agent.py
-│   ├── change_correlator_agent.py
-│   ├── topology_inference_agent.py
-│   ├── hypothesis_generator_agent.py
-│   └── remediation_planner_agent.py
-├── schemas/              # Base schemas and interfaces
-│   └── base_agent.py
-├── prompts/              # Agent prompt templates
-│   ├── log_analyzer_agent.md
-│   ├── metrics_analyzer_agent.md
-│   └── ...
-├── chains/               # Orchestration logic
-│   └── orchestrator.py
-├── patterns/             # Orchestration patterns
-│   ├── chain_of_thought_suppression.md
-│   ├── multi_agent_delegation.md
-│   ├── hypothesis_test_loop.md
-│   └── error_recovery.md
-├── examples/             # Usage examples
-│   ├── example_rca_chain.py
-│   └── synthetic_data.py
-├── docs/                 # Documentation
-│   ├── getting_started.md
-│   ├── agents_guide.md
-│   └── architecture.md
-└── README.md
+├── agents/                    # 6 specialized diagnostic agents
+├── chains/                    # Orchestrators (sync, async, streaming)
+├── schemas/                   # Pydantic models and base classes
+├── llm/                       # LLM provider integrations
+├── utils/                     # Caching, logging, metrics, PII filtering
+├── api/                       # FastAPI server + routes
+│   ├── server.py             # Main FastAPI app (v3.5)
+│   ├── websocket_routes.py   # Real-time streaming endpoints
+│   ├── webhook_routes.py     # Webhook management
+│   ├── knowledge_base_routes.py  # RAG endpoints
+│   ├── integrations_routes.py    # Enterprise integrations
+│   └── visualization_routes.py   # Interactive visualizations
+├── rag/                       # RAG & vector database
+│   ├── vector_db_manager.py  # ChromaDB persistence
+│   ├── incident_embeddings.py # Sentence-BERT embeddings
+│   ├── similarity_search.py  # Semantic search
+│   └── rag_enhancer.py       # LLM prompt enhancement
+├── integrations/              # Enterprise connectors
+│   ├── slack.py              # Slack integration
+│   ├── jira.py               # JIRA integration
+│   ├── pagerduty.py          # PagerDuty integration
+│   └── integration_manager.py # Unified manager
+├── visualization/             # Interactive charts & graphs
+│   ├── root_cause_graph.py   # Dependency graphs
+│   ├── timeline_chart.py     # Incident timelines
+│   └── metrics_dashboard.py  # Metrics visualization
+├── cli/                       # Command-line interface
+├── config/                    # Configuration management
+├── examples/                  # Usage examples
+├── tests/                     # Test suite (80%+ coverage)
+├── docs/                      # Documentation
+└── docker/                    # Docker & Kubernetes configs
 ```
 
-## Contributing
+### Running Tests
+```bash
+# Run all tests
+pytest
 
-Contributions welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+# With coverage
+pytest --cov=. --cov-report=html
+
+# Specific test file
+pytest tests/unit/test_async_orchestrator.py
+
+# Integration tests
+pytest tests/integration/
+```
+
+### Code Quality
+```bash
+# Format code
+black .
+
+# Sort imports
+isort .
+
+# Lint
+flake8 .
+
+# Type checking
+mypy .
+```
+
+---
+
+## 🚀 Deployment
+
+### Docker Compose (Recommended)
+```bash
+# Start complete stack
+docker-compose up -d
+
+# Services included:
+# - API server (port 8000)
+# - Redis cache (port 6379)
+# - Prometheus metrics (port 9090)
+# - Grafana dashboards (port 3000)
+# - ChromaDB vector database (embedded)
+```
+
+### Kubernetes
+```bash
+# Deploy to Kubernetes
+kubectl apply -f k8s/
+
+# Includes:
+# - API deployment (3 replicas)
+# - Redis StatefulSet
+# - Prometheus monitoring
+# - Ingress configuration
+```
+
+### Cloud Platforms
+- **AWS**: ECS Fargate + ElastiCache + RDS
+- **GCP**: Cloud Run + Memorystore + Cloud SQL
+- **Azure**: Container Apps + Redis + PostgreSQL
+
+See [deployment guide](docs/deployment.md) for detailed instructions.
+
+---
+
+## 🤝 Contributing
+
+We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
+### Adding New Features
+1. Fork the repository
+2. Create feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit changes (`git commit -m 'Add amazing feature'`)
+4. Push to branch (`git push origin feature/amazing-feature`)
+5. Open Pull Request
 
 ### Adding New Agents
-
-1. Extend `BaseAgent` class
-2. Implement `execute()` method
+1. Extend `BaseAgent` or `AsyncBaseAgent`
+2. Implement `execute()` or `execute_async()` method
 3. Create prompt template in `prompts/`
-4. Add tests and examples
+4. Add tests in `tests/unit/`
 5. Update documentation
 
-## License
+---
+
+## 📄 License
 
 MIT License - see [LICENSE](LICENSE) for details.
 
-## Citation
+---
 
-If you use ADAPT-Agents in your research or production systems, please cite:
+## 🌟 Star History
 
-```bibtex
-@software{adapt_agents,
-  title={ADAPT-Agents: Modular Diagnostic Agents Library},
-  author={Your Name},
-  year={2024},
-  url={https://github.com/yourusername/ADAPT-Agents}
-}
-```
+If you find ADAPT-Agents useful, please consider starring the repository!
 
-## Related Projects
+---
 
-- **ADAPT-RCA**: Root cause analysis framework
-- **ADAPT-UI**: Visualization and interaction layer
-- **ADAPT-Platform**: Complete diagnostic platform
+## 📞 Support & Community
 
-## Support
+- **Documentation**: [docs/](docs/)
+- **Issues**: [GitHub Issues](https://github.com/yourusername/ADAPT-Agents/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/yourusername/ADAPT-Agents/discussions)
+- **Discord**: [Join our community](https://discord.gg/adapt-agents)
 
-- Documentation: [docs/](docs/)
-- Issues: [GitHub Issues](https://github.com/yourusername/ADAPT-Agents/issues)
-- Discussions: [GitHub Discussions](https://github.com/yourusername/ADAPT-Agents/discussions)
+---
 
-## Roadmap
+## 🏆 Acknowledgments
 
-- [ ] Streaming agent outputs
-- [ ] Async execution by default
-- [ ] Additional agents (SecurityAnalyzer, CostAnalyzer)
-- [ ] LangChain integration
-- [ ] OpenTelemetry instrumentation
-- [ ] Cloud-native deployment templates
+Built with:
+- [FastAPI](https://fastapi.tiangolo.com/) - Modern web framework
+- [ChromaDB](https://www.trychroma.com/) - Vector database
+- [sentence-transformers](https://www.sbert.net/) - Embeddings
+- [NetworkX](https://networkx.org/) - Graph analysis
+- [Pydantic](https://pydantic.dev/) - Data validation
+- [OpenAI](https://openai.com/) / [Anthropic](https://www.anthropic.com/) - LLM providers
+
+---
+
+## 🎯 What's Next?
+
+**Upcoming in v3.6:**
+- 🔮 ML-based anomaly detection with Prophet/ARIMA
+- 🧪 Predictive analytics for incident prevention
+- 🌐 Multi-tenancy support
+- 📱 Mobile-friendly dashboards
+- 🔄 Bi-directional integration sync
+
+See [ROADMAP.md](ROADMAP.md) for the complete roadmap.
+
+---
+
+## 📊 Comparison with Commercial Platforms
+
+### DataDog vs ADAPT-Agents
+| Feature | DataDog | ADAPT-Agents |
+|---------|---------|--------------|
+| RCA Analysis | ✓ | ✅ |
+| Real-Time Streaming | ✓ | ✅ |
+| AI/ML Learning | Limited | ✅ RAG + ChromaDB |
+| Integrations | 500+ | Slack/JIRA/PD + extensible |
+| Cost | $15-31/host/mo | **FREE** |
+| Self-Hosted | ❌ | ✅ |
+
+### Grafana vs ADAPT-Agents
+| Feature | Grafana | ADAPT-Agents |
+|---------|---------|--------------|
+| Dashboards | ✓ | ✅ |
+| Alerting | ✓ | ✅ via integrations |
+| RCA Automation | Plugins | ✅ Native |
+| AI-Powered | ❌ | ✅ |
+| Cost | Free | **FREE** |
+
+### PagerDuty vs ADAPT-Agents
+| Feature | PagerDuty | ADAPT-Agents |
+|---------|-----------|--------------|
+| Incident Management | ✓ | ✅ via integrations |
+| RCA Automation | AIOps | ✅ Native + RAG |
+| Cost | $21-51/user/mo | **FREE** |
+| Customizable | Limited | ✅ Full control |
+
+**Winner:** ADAPT-Agents offers enterprise features at zero cost with unique AI learning capabilities.
+
+---
+
+**Built with ❤️ by the open-source community. Join us in revolutionizing incident management!**
