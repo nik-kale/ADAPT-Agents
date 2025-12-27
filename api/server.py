@@ -35,6 +35,7 @@ from config.settings import get_settings
 from api.auth import get_api_key, generate_ws_token
 from utils.rate_limiter import rate_limiter
 from utils.cleanup import get_cleanup_service, scheduled_cleanup_task
+from utils.circuit_breaker import circuit_breaker_registry
 
 # Import WebSocket routes
 try:
@@ -729,6 +730,89 @@ async def liveness_check():
     This is a lightweight check.
     """
     return {"alive": True}
+
+
+@app.get("/health/circuit-breakers")
+async def circuit_breaker_status():
+    """
+    Get status of all circuit breakers
+    
+    Shows current state, failure rates, and recent failures for all
+    protected external services (LLM APIs, integrations, etc.).
+    
+    Useful for debugging service outages and monitoring system resilience.
+    """
+    all_states = circuit_breaker_registry.get_all_states()
+    
+    # Count circuits by state
+    state_counts = {
+        "closed": 0,
+        "open": 0,
+        "half_open": 0
+    }
+    
+    for state_info in all_states.values():
+        current_state = state_info.get("state", "closed")
+        if current_state in state_counts:
+            state_counts[current_state] += 1
+    
+    # Determine overall system health
+    if state_counts["open"] > 0:
+        overall_health = "degraded"
+    elif state_counts["half_open"] > 0:
+        overall_health = "recovering"
+    else:
+        overall_health = "healthy"
+    
+    return {
+        "overall_health": overall_health,
+        "summary": state_counts,
+        "total_circuits": len(all_states),
+        "circuits": all_states
+    }
+
+
+@app.post("/admin/circuit-breakers/reset")
+async def reset_circuit_breakers(
+    circuit_name: Optional[str] = None,
+    api_key: str = Depends(get_api_key)
+):
+    """
+    Manually reset circuit breakers
+    
+    Resets circuit breaker(s) to CLOSED state, allowing requests to flow again.
+    Use with caution - only reset if you're sure the service has recovered.
+    
+    Query Parameters:
+    - circuit_name: Optional specific circuit to reset. If not provided, resets all.
+    
+    Example:
+    ```bash
+    # Reset all circuits
+    curl -X POST http://localhost:8000/admin/circuit-breakers/reset \
+      -H "X-API-Key: your-key"
+    
+    # Reset specific circuit
+    curl -X POST "http://localhost:8000/admin/circuit-breakers/reset?circuit_name=llm_gpt-4" \
+      -H "X-API-Key: your-key"
+    ```
+    """
+    if circuit_name:
+        circuit = circuit_breaker_registry.get(circuit_name)
+        if not circuit:
+            raise HTTPException(status_code=404, detail=f"Circuit breaker '{circuit_name}' not found")
+        
+        circuit.reset()
+        return {
+            "message": f"Circuit breaker '{circuit_name}' reset successfully",
+            "state": circuit.get_state()
+        }
+    else:
+        circuit_breaker_registry.reset_all()
+        return {
+            "message": "All circuit breakers reset successfully",
+            "total_reset": len(circuit_breaker_registry._breakers)
+        }
 
 
 @app.post("/admin/cleanup")
