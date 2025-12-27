@@ -75,14 +75,19 @@ async def get_api_key(
             detail="Invalid or missing API key. Provide X-API-Key header."
         )
 
-    # Check rate limit
-    if not rate_limiter.is_allowed(api_key):
+    # Check rate limit with tier-based limits
+    key_info = valid_api_keys.get(api_key, {})
+    tier = key_info.get('tier', 'free')
+    
+    if not rate_limiter.is_allowed(api_key, tier):
+        limit_info = rate_limiter.get_limit_info(api_key, tier)
         auth_logger.warning(
-            f"Rate limit exceeded: key={api_key[:8]}... | ip={client_ip} | time={timestamp}"
+            f"Rate limit exceeded: key={api_key[:8]}... | tier={tier} | "
+            f"limit={limit_info['limit']}/min | ip={client_ip} | time={timestamp}"
         )
         raise HTTPException(
             status_code=429,
-            detail=f"Rate limit exceeded. Limit: {RATE_LIMIT_REQUESTS} requests per {RATE_LIMIT_WINDOW}s"
+            detail=f"Rate limit exceeded. Tier: {tier}, Limit: {limit_info['limit']} requests per {limit_info['window_seconds']}s"
         )
 
     # Log successful authentication
