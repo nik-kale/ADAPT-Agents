@@ -414,3 +414,150 @@ async def enhance_prompt_with_rag(
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to enhance prompt: {str(e)}")
+
+
+@router.post("/knowledge-base/backup", tags=["knowledge-base"])
+async def create_knowledge_base_backup(
+    backup_path: Optional[str] = None,
+    api_key: str = Depends(get_api_key)
+):
+    """
+    Create a backup of the entire ChromaDB knowledge base
+    
+    Creates a complete copy of all vector embeddings and metadata.
+    Backup can be restored later using the restore endpoint.
+    
+    Query Parameters:
+    - backup_path: Optional custom backup path. If not provided,
+                   creates backup in ./backups/chroma_{timestamp}
+    
+    Example:
+    ```bash
+    curl -X POST http://localhost:8000/knowledge-base/backup \
+      -H "X-API-Key: your-key"
+    ```
+    """
+    try:
+        components = get_rag_components()
+        vector_db = components["vector_db"]
+        
+        result = vector_db.create_backup(backup_path)
+        
+        return {
+            "message": "Backup created successfully" if result.get("success") else "Backup failed",
+            "backup": result
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Backup failed: {str(e)}")
+
+
+@router.get("/knowledge-base/export", tags=["knowledge-base"])
+async def export_knowledge_base(
+    api_key: str = Depends(get_api_key)
+):
+    """
+    Export all knowledge base data as JSON
+    
+    Returns complete export of all collections including embeddings,
+    documents, and metadata. Can be used for migration or archival.
+    
+    Warning: Response may be large if knowledge base contains many incidents.
+    
+    Example:
+    ```bash
+    curl http://localhost:8000/knowledge-base/export \
+      -H "X-API-Key: your-key" > knowledge_base_export.json
+    ```
+    """
+    try:
+        components = get_rag_components()
+        vector_db = components["vector_db"]
+        
+        export_data = vector_db.export_all()
+        
+        if "error" in export_data:
+            raise HTTPException(status_code=500, detail=export_data["error"])
+        
+        return export_data
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Export failed: {str(e)}")
+
+
+@router.post("/knowledge-base/import", tags=["knowledge-base"])
+async def import_knowledge_base(
+    import_data: Dict[str, Any],
+    api_key: str = Depends(get_api_key)
+):
+    """
+    Import knowledge base data from JSON export
+    
+    Imports data that was previously exported using the export endpoint.
+    Data is added to existing collections (does not clear existing data).
+    
+    Request Body: JSON export data from export endpoint
+    
+    Example:
+    ```bash
+    curl -X POST http://localhost:8000/knowledge-base/import \
+      -H "X-API-Key: your-key" \
+      -H "Content-Type: application/json" \
+      -d @knowledge_base_export.json
+    ```
+    """
+    try:
+        components = get_rag_components()
+        vector_db = components["vector_db"]
+        
+        stats = vector_db.import_all(import_data)
+        
+        if "error" in stats:
+            raise HTTPException(status_code=500, detail=stats["error"])
+        
+        return {
+            "message": "Import completed successfully",
+            "stats": stats
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Import failed: {str(e)}")
+
+
+@router.post("/knowledge-base/restore", tags=["knowledge-base"])
+async def restore_knowledge_base(
+    backup_path: str,
+    api_key: str = Depends(get_api_key)
+):
+    """
+    Restore knowledge base from a backup
+    
+    Replaces current knowledge base with data from a backup directory.
+    
+    WARNING: This will delete all current data!
+    
+    Query Parameters:
+    - backup_path: Path to the backup directory
+    
+    Example:
+    ```bash
+    curl -X POST "http://localhost:8000/knowledge-base/restore?backup_path=./backups/chroma_20251226_100000" \
+      -H "X-API-Key: your-key"
+    ```
+    """
+    try:
+        components = get_rag_components()
+        vector_db = components["vector_db"]
+        
+        result = vector_db.restore_from_backup(backup_path)
+        
+        if not result.get("success"):
+            raise HTTPException(status_code=500, detail=result.get("error"))
+        
+        return {
+            "message": "Restore completed successfully",
+            "restore": result
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Restore failed: {str(e)}")

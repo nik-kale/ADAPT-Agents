@@ -10,6 +10,10 @@ import uuid
 import json
 from datetime import datetime
 from pathlib import Path
+import shutil
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class VectorDBManager:
@@ -335,3 +339,213 @@ class VectorDBManager:
         """Reset all collections (use with caution!)"""
         self.client.reset()
         self._init_collections()
+    
+    def create_backup(self, backup_path: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Create a backup of the entire ChromaDB database
+        
+        Args:
+            backup_path: Optional custom backup path. If not provided,
+                        creates backup in ./backups/chroma_{timestamp}
+        
+        Returns:
+            Dictionary with backup information
+        """
+        if backup_path is None:
+            timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+            backup_path = f"./backups/chroma_{timestamp}"
+        
+        backup_dir = Path(backup_path)
+        backup_dir.parent.mkdir(parents=True, exist_ok=True)
+        
+        try:
+            # Copy entire ChromaDB directory
+            shutil.copytree(self.persist_directory, backup_dir)
+            
+            # Get backup size
+            backup_size_bytes = sum(
+                f.stat().st_size for f in backup_dir.rglob('*') if f.is_file()
+            )
+            backup_size_mb = backup_size_bytes / (1024 * 1024)
+            
+            # Get collection stats
+            stats = self.get_collection_stats()
+            
+            logger.info(f"Backup created at {backup_dir}, size: {backup_size_mb:.2f}MB")
+            
+            return {
+                "success": True,
+                "backup_path": str(backup_dir),
+                "size_mb": round(backup_size_mb, 2),
+                "timestamp": datetime.utcnow().isoformat(),
+                "collections": stats
+            }
+            
+        except Exception as e:
+            logger.error(f"Backup failed: {e}")
+            return {
+                "success": False,
+                "error": str(e)
+            }
+    
+    def export_all(self) -> Dict[str, Any]:
+        """
+        Export all data from ChromaDB as JSON
+        
+        Returns:
+            Dictionary containing all collections data
+        """
+        try:
+            export_data = {
+                "export_timestamp": datetime.utcnow().isoformat(),
+                "collections": {}
+            }
+            
+            # Export incidents
+            incidents_data = self.incidents_collection.get(
+                include=["embeddings", "documents", "metadatas"]
+            )
+            export_data["collections"]["incidents"] = {
+                "count": len(incidents_data["ids"]),
+                "data": incidents_data
+            }
+            
+            # Export findings
+            findings_data = self.findings_collection.get(
+                include=["embeddings", "documents", "metadatas"]
+            )
+            export_data["collections"]["findings"] = {
+                "count": len(findings_data["ids"]),
+                "data": findings_data
+            }
+            
+            # Export remediations
+            remediations_data = self.remediations_collection.get(
+                include=["embeddings", "documents", "metadatas"]
+            )
+            export_data["collections"]["remediations"] = {
+                "count": len(remediations_data["ids"]),
+                "data": remediations_data
+            }
+            
+            logger.info(f"Export completed: {export_data['collections']['incidents']['count']} incidents")
+            
+            return export_data
+            
+        except Exception as e:
+            logger.error(f"Export failed: {e}")
+            return {
+                "error": str(e)
+            }
+    
+    def import_all(self, import_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Import data into ChromaDB from JSON export
+        
+        Args:
+            import_data: Dictionary containing exported collection data
+        
+        Returns:
+            Import statistics
+        """
+        try:
+            stats = {
+                "incidents_imported": 0,
+                "findings_imported": 0,
+                "remediations_imported": 0,
+                "errors": []
+            }
+            
+            # Import incidents
+            if "incidents" in import_data.get("collections", {}):
+                inc_data = import_data["collections"]["incidents"]["data"]
+                if inc_data["ids"]:
+                    self.incidents_collection.add(
+                        ids=inc_data["ids"],
+                        embeddings=inc_data.get("embeddings"),
+                        documents=inc_data.get("documents"),
+                        metadatas=inc_data.get("metadatas")
+                    )
+                    stats["incidents_imported"] = len(inc_data["ids"])
+            
+            # Import findings
+            if "findings" in import_data.get("collections", {}):
+                find_data = import_data["collections"]["findings"]["data"]
+                if find_data["ids"]:
+                    self.findings_collection.add(
+                        ids=find_data["ids"],
+                        embeddings=find_data.get("embeddings"),
+                        documents=find_data.get("documents"),
+                        metadatas=find_data.get("metadatas")
+                    )
+                    stats["findings_imported"] = len(find_data["ids"])
+            
+            # Import remediations
+            if "remediations" in import_data.get("collections", {}):
+                rem_data = import_data["collections"]["remediations"]["data"]
+                if rem_data["ids"]:
+                    self.remediations_collection.add(
+                        ids=rem_data["ids"],
+                        embeddings=rem_data.get("embeddings"),
+                        documents=rem_data.get("documents"),
+                        metadatas=rem_data.get("metadatas")
+                    )
+                    stats["remediations_imported"] = len(rem_data["ids"])
+            
+            logger.info(f"Import completed: {stats}")
+            
+            return stats
+            
+        except Exception as e:
+            logger.error(f"Import failed: {e}")
+            return {
+                "error": str(e)
+            }
+    
+    def restore_from_backup(self, backup_path: str) -> Dict[str, Any]:
+        """
+        Restore ChromaDB from a backup directory
+        
+        Args:
+            backup_path: Path to backup directory
+        
+        Returns:
+            Restore status information
+        """
+        backup_dir = Path(backup_path)
+        
+        if not backup_dir.exists():
+            return {
+                "success": False,
+                "error": f"Backup directory not found: {backup_path}"
+            }
+        
+        try:
+            # Remove current database
+            if self.persist_directory.exists():
+                shutil.rmtree(self.persist_directory)
+            
+            # Copy backup to persist directory
+            shutil.copytree(backup_dir, self.persist_directory)
+            
+            # Reinitialize client
+            self.__init__(str(self.persist_directory))
+            
+            # Get stats
+            stats = self.get_collection_stats()
+            
+            logger.info(f"Restore completed from {backup_path}")
+            
+            return {
+                "success": True,
+                "backup_path": str(backup_dir),
+                "timestamp": datetime.utcnow().isoformat(),
+                "collections": stats
+            }
+            
+        except Exception as e:
+            logger.error(f"Restore failed: {e}")
+            return {
+                "success": False,
+                "error": str(e)
+            }
