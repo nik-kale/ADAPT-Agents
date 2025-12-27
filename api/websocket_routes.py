@@ -3,12 +3,13 @@ WebSocket Routes for Real-Time Streaming
 Provides WebSocket endpoints for live agent execution updates
 """
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, HTTPException
 from typing import Optional
 import json
 import logging
 
 from api.websocket_manager import manager
+from api.auth import verify_ws_token, auth_logger
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +19,8 @@ router = APIRouter()
 @router.websocket("/ws/analysis/{analysis_id}")
 async def websocket_analysis_endpoint(
     websocket: WebSocket,
-    analysis_id: str
+    analysis_id: str,
+    token: str = Query(...)
 ):
     """
     WebSocket endpoint for specific analysis real-time updates
@@ -30,15 +32,42 @@ async def websocket_analysis_endpoint(
     - Completion notifications
     - Errors
 
+    Requires authentication via token query parameter.
+    Generate token via POST /ws/token endpoint.
+
     Usage:
     ```javascript
-    const ws = new WebSocket('ws://localhost:8000/ws/analysis/{analysis_id}');
+    // First, get a token
+    const tokenResp = await fetch('/ws/token', {
+        method: 'POST',
+        headers: {'X-API-Key': 'your-key'}
+    });
+    const {token} = await tokenResp.json();
+
+    // Then connect with token
+    const ws = new WebSocket(`ws://localhost:8000/ws/analysis/${analysisId}?token=${token}`);
     ws.onmessage = (event) => {
         const data = JSON.parse(event.data);
         console.log('Update:', data);
     };
     ```
     """
+    # Validate token before accepting connection
+    try:
+        token_info = verify_ws_token(token, analysis_id)
+    except HTTPException as e:
+        await websocket.close(code=e.status_code, reason=e.detail)
+        auth_logger.warning(
+            f"WebSocket connection rejected: analysis_id={analysis_id} | reason={e.detail}"
+        )
+        return
+
+    # Log successful connection
+    auth_logger.info(
+        f"WebSocket connected: analysis_id={analysis_id} | "
+        f"api_key={token_info['api_key'][:8]}..."
+    )
+
     await manager.connect(websocket, analysis_id)
 
     try:
@@ -90,7 +119,10 @@ async def websocket_analysis_endpoint(
 
 
 @router.websocket("/ws/broadcast")
-async def websocket_broadcast_endpoint(websocket: WebSocket):
+async def websocket_broadcast_endpoint(
+    websocket: WebSocket,
+    token: str = Query(...)
+):
     """
     WebSocket endpoint for broadcast updates
 
@@ -99,15 +131,41 @@ async def websocket_broadcast_endpoint(websocket: WebSocket):
     - Completions
     - System-wide statistics
 
+    Requires authentication via token query parameter.
+    Generate token via POST /ws/token endpoint.
+
     Usage:
     ```javascript
-    const ws = new WebSocket('ws://localhost:8000/ws/broadcast');
+    // First, get a token
+    const tokenResp = await fetch('/ws/token', {
+        method: 'POST',
+        headers: {'X-API-Key': 'your-key'}
+    });
+    const {token} = await tokenResp.json();
+
+    // Then connect with token
+    const ws = new WebSocket(`ws://localhost:8000/ws/broadcast?token=${token}`);
     ws.onmessage = (event) => {
         const data = JSON.parse(event.data);
         console.log('System update:', data);
     };
     ```
     """
+    # Validate token before accepting connection
+    try:
+        token_info = verify_ws_token(token)
+    except HTTPException as e:
+        await websocket.close(code=e.status_code, reason=e.detail)
+        auth_logger.warning(
+            f"WebSocket broadcast connection rejected: reason={e.detail}"
+        )
+        return
+
+    # Log successful connection
+    auth_logger.info(
+        f"WebSocket broadcast connected: api_key={token_info['api_key'][:8]}..."
+    )
+
     await manager.connect(websocket)
 
     try:
@@ -150,6 +208,7 @@ async def websocket_broadcast_endpoint(websocket: WebSocket):
 async def websocket_agent_endpoint(
     websocket: WebSocket,
     agent_name: str,
+    token: str = Query(...),
     analysis_id: Optional[str] = Query(None)
 ):
     """
@@ -161,15 +220,44 @@ async def websocket_agent_endpoint(
     - Findings
     - Completions
 
+    Requires authentication via token query parameter.
+    Generate token via POST /ws/token endpoint.
+
     Usage:
     ```javascript
-    const ws = new WebSocket('ws://localhost:8000/ws/agent/LogAnalyzerAgent?analysis_id=xxx');
+    // First, get a token
+    const tokenResp = await fetch('/ws/token', {
+        method: 'POST',
+        headers: {'X-API-Key': 'your-key'},
+        body: JSON.stringify({analysis_ids: ['xxx']})
+    });
+    const {token} = await tokenResp.json();
+
+    // Then connect with token
+    const ws = new WebSocket(`ws://localhost:8000/ws/agent/LogAnalyzerAgent?token=${token}&analysis_id=xxx`);
     ws.onmessage = (event) => {
         const data = JSON.parse(event.data);
         console.log('Agent update:', data);
     };
     ```
     """
+    # Validate token before accepting connection
+    try:
+        token_info = verify_ws_token(token, analysis_id)
+    except HTTPException as e:
+        await websocket.close(code=e.status_code, reason=e.detail)
+        auth_logger.warning(
+            f"WebSocket agent connection rejected: agent={agent_name} | "
+            f"analysis_id={analysis_id} | reason={e.detail}"
+        )
+        return
+
+    # Log successful connection
+    auth_logger.info(
+        f"WebSocket agent connected: agent={agent_name} | "
+        f"analysis_id={analysis_id or 'any'} | api_key={token_info['api_key'][:8]}..."
+    )
+
     connection_id = f"{agent_name}:{analysis_id}" if analysis_id else agent_name
     await manager.connect(websocket, connection_id)
 
