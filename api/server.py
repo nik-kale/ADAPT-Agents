@@ -18,7 +18,7 @@ Provides REST API for agent execution with:
 from fastapi import FastAPI, BackgroundTasks, HTTPException, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, validator
+from pydantic import BaseModel, validator, field_validator, HttpUrl
 from typing import Dict, Any, List, Optional
 import uuid
 import asyncio
@@ -341,7 +341,7 @@ db = DatabaseOperations()
 # === Request/Response Models ===
 
 class AnalysisRequest(BaseModel):
-    """Request to start analysis"""
+    """Request to start analysis with enhanced validation"""
     incident_data: Dict[str, Any]
     agents: Optional[List[str]] = None
     parameters: Optional[Dict[str, Any]] = None
@@ -351,9 +351,66 @@ class AnalysisRequest(BaseModel):
 
     @validator('incident_data')
     def validate_incident_data(cls, v):
-        """Validate incident data has required fields"""
+        """Validate incident data has required fields and proper structure"""
         if not v:
             raise ValueError("incident_data cannot be empty")
+        
+        if not isinstance(v, dict):
+            raise ValueError("incident_data must be a dictionary")
+        
+        # Validate at least one of the common data sources is present
+        required_fields = ['logs', 'metrics', 'changes', 'traces', 'events']
+        if not any(field in v for field in required_fields):
+            raise ValueError(
+                f"incident_data must contain at least one of: {', '.join(required_fields)}"
+            )
+        
+        return v
+    
+    @validator('agents')
+    def validate_agents(cls, v):
+        """Validate agent list"""
+        if v is not None:
+            if not isinstance(v, list):
+                raise ValueError("agents must be a list")
+            
+            valid_agents = [
+                'LogAnalyzerAgent',
+                'MetricsAnalyzerAgent',
+                'ChangeCorrelatorAgent',
+                'TopologyInferenceAgent',
+                'HypothesisGeneratorAgent',
+                'RemediationPlannerAgent'
+            ]
+            
+            for agent in v:
+                if agent not in valid_agents:
+                    raise ValueError(
+                        f"Unknown agent: {agent}. Valid agents: {', '.join(valid_agents)}"
+                    )
+        
+        return v
+    
+    @validator('callback_url')
+    def validate_callback_url(cls, v):
+        """Validate callback URL format"""
+        if v is not None:
+            if not isinstance(v, str):
+                raise ValueError("callback_url must be a string")
+            
+            # Basic URL validation
+            if not v.startswith(('http://', 'https://')):
+                raise ValueError("callback_url must start with http:// or https://")
+        
+        return v
+    
+    @validator('parameters')
+    def validate_parameters(cls, v):
+        """Validate parameters structure"""
+        if v is not None:
+            if not isinstance(v, dict):
+                raise ValueError("parameters must be a dictionary")
+        
         return v
 
 
@@ -366,10 +423,32 @@ class AnalysisResponse(BaseModel):
 
 
 class AgentExecutionRequest(BaseModel):
-    """Request to execute single agent"""
+    """Request to execute single agent with enhanced validation"""
     context: Dict[str, Any]
     parameters: Optional[Dict[str, Any]] = {}
     use_llm: bool = False
+    
+    @validator('context')
+    def validate_context(cls, v):
+        """Validate context is not empty and is a dictionary"""
+        if not v:
+            raise ValueError("context cannot be empty")
+        
+        if not isinstance(v, dict):
+            raise ValueError("context must be a dictionary")
+        
+        return v
+    
+    @validator('parameters')
+    def validate_parameters(cls, v):
+        """Validate parameters structure"""
+        if v is None:
+            return {}
+        
+        if not isinstance(v, dict):
+            raise ValueError("parameters must be a dictionary")
+        
+        return v
 
 
 # === API Endpoints ===
