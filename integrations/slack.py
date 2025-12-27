@@ -6,7 +6,11 @@ Sends notifications, alerts, and RCA summaries to Slack channels
 from typing import Dict, Any, Optional, List
 import httpx
 import json
+import logging
 from datetime import datetime
+from utils.circuit_breaker import circuit_breaker_registry
+
+logger = logging.getLogger(__name__)
 
 
 class SlackIntegration:
@@ -33,6 +37,26 @@ class SlackIntegration:
         self.webhook_url = webhook_url
         self.bot_token = bot_token
         self.api_base = "https://slack.com/api"
+        
+        # Initialize circuit breaker for Slack API
+        self.circuit_breaker = circuit_breaker_registry.get_or_create(
+            name="slack_api",
+            failure_threshold=5,
+            recovery_timeout=60,
+            half_open_requests=2,
+            expected_exception=Exception,
+            fallback=self._slack_fallback
+        )
+        logger.info("Slack integration initialized with circuit breaker")
+    
+    async def _slack_fallback(self, *args, **kwargs) -> Dict[str, Any]:
+        """Fallback when Slack API is unavailable"""
+        logger.warning("Slack API unavailable, message queued for retry")
+        return {
+            "ok": False,
+            "error": "slack_unavailable",
+            "message": "Slack API is temporarily unavailable. Message queued for retry."
+        }
 
     async def send_incident_alert(
         self,
@@ -298,8 +322,8 @@ class SlackIntegration:
         else:
             raise ValueError("Either webhook_url or (bot_token and channel) must be provided")
 
-    async def _send_webhook(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        """Send message via incoming webhook"""
+    async def _send_webhook_internal(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Internal method: Send message via incoming webhook"""
         async with httpx.AsyncClient() as client:
             response = await client.post(
                 self.webhook_url,
@@ -310,16 +334,27 @@ class SlackIntegration:
             if response.status_code == 200 and response.text == "ok":
                 return {"success": True, "message": "Message sent via webhook"}
             else:
-                return {"success": False, "error": response.text}
+                raise Exception(f"Slack webhook failed: {response.text}")
+    
+    async def _send_webhook(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Send message via incoming webhook with circuit breaker protection"""
+        try:
+            return await self.circuit_breaker.execute(
+                self._send_webhook_internal,
+                payload
+            )
+        except Exception as e:
+            logger.error(f"Slack webhook error: {e}")
+            return {"success": False, "error": str(e)}
 
-    async def _send_chat_message(
+    async def _send_chat_message_internal(
         self,
         channel: str,
         text: Optional[str] = None,
         blocks: Optional[List[Dict]] = None,
         attachments: Optional[List[Dict]] = None
     ) -> Dict[str, Any]:
-        """Send message via Slack API (chat.postMessage)"""
+        """Internal method: Send message via Slack API"""
         payload = {"channel": channel}
 
         if text:
@@ -339,8 +374,32 @@ class SlackIntegration:
                 json=payload,
                 timeout=30
             )
-
-            return response.json()
+            
+            result = response.json()
+            if not result.get("ok"):
+                raise Exception(f"Slack API error: {result.get('error', 'Unknown')}")
+            
+            return result
+    
+    async def _send_chat_message(
+        self,
+        channel: str,
+        text: Optional[str] = None,
+        blocks: Optional[List[Dict]] = None,
+        attachments: Optional[List[Dict]] = None
+    ) -> Dict[str, Any]:
+        """Send message via Slack API with circuit breaker protection"""
+        try:
+            return await self.circuit_breaker.execute(
+                self._send_chat_message_internal,
+                channel,
+                text,
+                blocks,
+                attachments
+            )
+        except Exception as e:
+            logger.error(f"Slack API error: {e}")
+            return {"ok": False, "error": str(e)}
 
     async def test_connection(self) -> Dict[str, Any]:
         """Test Slack connection"""
