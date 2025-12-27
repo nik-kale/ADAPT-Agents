@@ -34,6 +34,7 @@ from contextlib import asynccontextmanager
 from config.settings import get_settings
 from api.auth import get_api_key, generate_ws_token
 from utils.rate_limiter import rate_limiter
+from utils.cleanup import get_cleanup_service, scheduled_cleanup_task
 
 # Import WebSocket routes
 try:
@@ -157,6 +158,15 @@ async def lifespan(app: FastAPI):
             print(f"✓ Metrics server started on port {settings.metrics_port}")
     except Exception as e:
         print(f"⚠️  Metrics server warning: {e}")
+    
+    # Start cleanup scheduler if enabled
+    cleanup_task = None
+    try:
+        if settings.enable_auto_cleanup:
+            cleanup_task = asyncio.create_task(scheduled_cleanup_task())
+            print(f"✓ Cleanup scheduler started (retention: {settings.data_retention_days} days)")
+    except Exception as e:
+        print(f"⚠️  Cleanup scheduler warning: {e}")
 
     print("✅ API server ready")
 
@@ -164,6 +174,14 @@ async def lifespan(app: FastAPI):
 
     # Shutdown
     print("\n🛑 Shutting down gracefully...")
+
+    # Cancel cleanup task if running
+    if cleanup_task and not cleanup_task.done():
+        cleanup_task.cancel()
+        try:
+            await cleanup_task
+        except asyncio.CancelledError:
+            pass
 
     # Close database connections, cleanup resources, etc.
     # (SQLite auto-closes, but you could add cleanup here)
@@ -682,6 +700,57 @@ async def liveness_check():
     This is a lightweight check.
     """
     return {"alive": True}
+
+
+@app.post("/admin/cleanup")
+async def manual_cleanup(
+    retention_days: Optional[int] = None,
+    api_key: str = Depends(get_api_key)
+):
+    """
+    Manually trigger data cleanup
+    
+    Removes analyses and embeddings older than retention period.
+    Requires authentication.
+    
+    Query Parameters:
+    - retention_days: Optional override for retention period (defaults to configured value)
+    """
+    cleanup_service = get_cleanup_service(DB_PATH)
+    
+    if retention_days is not None:
+        result = await cleanup_service.run_full_cleanup()
+        # Override retention for this run
+        result["retention_days_override"] = retention_days
+    else:
+        result = await cleanup_service.run_full_cleanup()
+    
+    return {
+        "message": "Cleanup completed",
+        "result": result
+    }
+
+
+@app.get("/admin/cleanup/stats")
+async def get_cleanup_stats(api_key: str = Depends(get_api_key)):
+    """
+    Get cleanup service statistics
+    
+    Returns information about past cleanup runs and current database size.
+    """
+    cleanup_service = get_cleanup_service(DB_PATH)
+    stats = cleanup_service.get_stats()
+    size_info = await cleanup_service.get_database_size()
+    
+    return {
+        "cleanup_stats": stats,
+        "database_size": size_info,
+        "retention_policy": {
+            "retention_days": get_settings().data_retention_days,
+            "auto_cleanup_enabled": get_settings().enable_auto_cleanup,
+            "schedule_hours": get_settings().cleanup_schedule_hours
+        }
+    }
 
 
 class WebSocketTokenRequest(BaseModel):
