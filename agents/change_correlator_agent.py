@@ -6,6 +6,7 @@ Now with async/await, LLM integration, caching, and metrics!
 
 from typing import Dict, Any, List
 from datetime import datetime, timedelta
+from pydantic import field_validator
 from schemas import (
     AsyncBaseAgent, BaseAgentInput, BaseAgentOutput,
     Finding, AgentStatus, ConfidenceLevel, AgentCapabilities
@@ -13,6 +14,69 @@ from schemas import (
 from utils.metrics import record_execution_metrics
 from utils.caching import get_cache
 from utils.logging import get_logger
+
+
+class ChangeCorrelatorAgentInput(BaseAgentInput):
+    """Input schema for Change Correlator Agent with enhanced validation"""
+    
+    @field_validator('context')
+    @classmethod
+    def validate_context(cls, v):
+        """Validate context contains required fields with proper types"""
+        if not isinstance(v, dict):
+            raise ValueError('context must be a dictionary')
+        
+        # Validate changes field if present
+        if 'changes' in v:
+            if not isinstance(v['changes'], list):
+                raise ValueError('changes must be a list')
+            
+            for idx, change in enumerate(v['changes']):
+                if not isinstance(change, dict):
+                    raise ValueError(f'change entry at index {idx} must be a dictionary')
+                
+                # Validate required change fields
+                if 'timestamp' not in change and 'time' not in change:
+                    raise ValueError(
+                        f'change entry at index {idx} must contain "timestamp" or "time" field'
+                    )
+                
+                if 'type' not in change and 'change_type' not in change:
+                    raise ValueError(
+                        f'change entry at index {idx} must contain "type" or "change_type" field'
+                    )
+        
+        # Validate incident_time if present
+        if 'incident_time' in v:
+            incident_time = v['incident_time']
+            if not isinstance(incident_time, (str, datetime)):
+                raise ValueError('incident_time must be a string or datetime object')
+        
+        return v
+    
+    @field_validator('parameters')
+    @classmethod
+    def validate_parameters(cls, v):
+        """Validate agent-specific parameters"""
+        if v is None:
+            return {}
+        
+        if not isinstance(v, dict):
+            raise ValueError('parameters must be a dictionary')
+        
+        # Validate window_minutes
+        if 'window_minutes' in v:
+            window = v['window_minutes']
+            if not isinstance(window, int) or window < 1 or window > 1440:
+                raise ValueError('window_minutes must be an integer between 1 and 1440 (24 hours)')
+        
+        # Validate risk_threshold
+        if 'risk_threshold' in v:
+            threshold = v['risk_threshold']
+            if not isinstance(threshold, (int, float)) or threshold < 0 or threshold > 100:
+                raise ValueError('risk_threshold must be a number between 0 and 100')
+        
+        return v
 
 
 class ChangeCorrelatorAgent(AsyncBaseAgent):

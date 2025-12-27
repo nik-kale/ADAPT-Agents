@@ -7,6 +7,7 @@ Now with async/await, LLM integration, caching, and metrics!
 from typing import Dict, Any, List, Tuple
 from datetime import datetime
 import statistics
+from pydantic import field_validator
 from schemas import (
     AsyncBaseAgent, BaseAgentInput, BaseAgentOutput,
     Finding, AgentStatus, ConfidenceLevel, AgentCapabilities
@@ -14,6 +15,75 @@ from schemas import (
 from utils.metrics import record_execution_metrics
 from utils.caching import get_cache
 from utils.logging import get_logger
+
+
+class MetricsAnalyzerAgentInput(BaseAgentInput):
+    """Input schema for Metrics Analyzer Agent with enhanced validation"""
+    
+    @field_validator('context')
+    @classmethod
+    def validate_context(cls, v):
+        """Validate context contains required fields with proper types"""
+        if not isinstance(v, dict):
+            raise ValueError('context must be a dictionary')
+        
+        # Validate metrics field if present
+        if 'metrics' in v:
+            if not isinstance(v['metrics'], dict):
+                raise ValueError('metrics must be a dictionary')
+            
+            for metric_name, metric_data in v['metrics'].items():
+                if not isinstance(metric_data, (list, dict)):
+                    raise ValueError(
+                        f'metric "{metric_name}" must be a list or dictionary with time-series data'
+                    )
+                
+                # If it's a list, validate it has data points
+                if isinstance(metric_data, list):
+                    if not metric_data:
+                        raise ValueError(f'metric "{metric_name}" cannot be empty')
+                    
+                    for idx, point in enumerate(metric_data):
+                        if not isinstance(point, dict):
+                            raise ValueError(
+                                f'data point at index {idx} in metric "{metric_name}" must be a dictionary'
+                            )
+                        
+                        if 'value' not in point and 'values' not in point:
+                            raise ValueError(
+                                f'data point at index {idx} in metric "{metric_name}" '
+                                'must contain "value" or "values" field'
+                            )
+        
+        return v
+    
+    @field_validator('parameters')
+    @classmethod
+    def validate_parameters(cls, v):
+        """Validate agent-specific parameters"""
+        if v is None:
+            return {}
+        
+        if not isinstance(v, dict):
+            raise ValueError('parameters must be a dictionary')
+        
+        # Validate threshold parameters
+        if 'anomaly_threshold' in v:
+            threshold = v['anomaly_threshold']
+            if not isinstance(threshold, (int, float)) or threshold < 0:
+                raise ValueError('anomaly_threshold must be a positive number')
+        
+        if 'correlation_min' in v:
+            corr_min = v['correlation_min']
+            if not isinstance(corr_min, (int, float)) or corr_min < -1 or corr_min > 1:
+                raise ValueError('correlation_min must be a number between -1 and 1')
+        
+        if 'min_data_points' in v:
+            min_points = v['min_data_points']
+            if not isinstance(min_points, int) or min_points < 1:
+                raise ValueError('min_data_points must be a positive integer')
+        
+        return v
 
 
 class MetricsAnalyzerAgent(AsyncBaseAgent):

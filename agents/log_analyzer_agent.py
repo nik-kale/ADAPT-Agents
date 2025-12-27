@@ -7,6 +7,7 @@ Now with async/await, LLM integration, caching, and metrics!
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 from collections import Counter, defaultdict
+from pydantic import field_validator, ValidationError
 from schemas import (
     AsyncBaseAgent, BaseAgentInput, BaseAgentOutput,
     Finding, AgentStatus, ConfidenceLevel, AgentCapabilities
@@ -17,8 +18,62 @@ from utils.logging import get_logger
 
 
 class LogAnalyzerAgentInput(BaseAgentInput):
-    """Input schema for Log Analyzer Agent"""
-    pass
+    """Input schema for Log Analyzer Agent with enhanced validation"""
+    
+    @field_validator('context')
+    @classmethod
+    def validate_context(cls, v):
+        """Validate context contains required fields with proper types"""
+        if not isinstance(v, dict):
+            raise ValueError('context must be a dictionary')
+        
+        # Validate logs field if present
+        if 'logs' in v:
+            if not isinstance(v['logs'], list):
+                raise ValueError('logs must be a list')
+            
+            for idx, log in enumerate(v['logs']):
+                if not isinstance(log, dict):
+                    raise ValueError(f'log entry at index {idx} must be a dictionary')
+                
+                # Ensure basic log structure
+                if 'message' not in log and 'msg' not in log:
+                    raise ValueError(
+                        f'log entry at index {idx} must contain "message" or "msg" field'
+                    )
+        
+        # Validate time_range if present
+        if 'time_range' in v:
+            time_range = v['time_range']
+            if not isinstance(time_range, dict):
+                raise ValueError('time_range must be a dictionary')
+            if 'start' not in time_range or 'end' not in time_range:
+                raise ValueError('time_range must contain "start" and "end" fields')
+        
+        return v
+    
+    @field_validator('parameters')
+    @classmethod
+    def validate_parameters(cls, v):
+        """Validate agent-specific parameters"""
+        if v is None:
+            return {}
+        
+        if not isinstance(v, dict):
+            raise ValueError('parameters must be a dictionary')
+        
+        # Validate numeric parameters
+        if 'max_findings' in v:
+            max_findings = v['max_findings']
+            if not isinstance(max_findings, int) or max_findings < 1 or max_findings > 100:
+                raise ValueError('max_findings must be an integer between 1 and 100')
+        
+        if 'confidence_threshold' in v:
+            threshold = v['confidence_threshold']
+            if not isinstance(threshold, (int, float)) or threshold < 0 or threshold > 1:
+                raise ValueError('confidence_threshold must be a number between 0 and 1')
+        
+        return v
 
 
 class LogAnalyzerAgent(AsyncBaseAgent):
