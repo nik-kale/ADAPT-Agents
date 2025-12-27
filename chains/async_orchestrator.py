@@ -16,6 +16,7 @@ from agents.hypothesis_generator_agent import HypothesisGeneratorAgent
 from agents.remediation_planner_agent import RemediationPlannerAgent
 from security.pii_filter import PIIFilter
 from utils.logging import get_logger
+from utils.tracing import trace_span, add_span_attributes, add_span_event
 
 
 class AsyncAgentOrchestrator:
@@ -80,72 +81,117 @@ class AsyncAgentOrchestrator:
             Dictionary with results from each phase
         """
         start_time = datetime.now()
-        self.logger.info("Starting async RCA chain", incident_time=incident_data.get("incident_time"))
-
-        # Filter PII if enabled
-        if self.pii_filter and "logs" in incident_data:
-            incident_data["logs"] = self.pii_filter.filter_logs(incident_data["logs"])
-            self.logger.info("PII filtered from logs", log_count=len(incident_data["logs"]))
-
-        results = {
-            "phase1_analysis": None,
-            "phase2_hypothesis": None,
-            "phase3_remediation": None,
-            "execution_summary": {}
-        }
-
-        # Phase 1: Parallel diagnostic analysis
-        self.logger.info("Phase 1: Running diagnostic agents in parallel")
-        phase1_results = await self._execute_phase1_parallel(incident_data)
-        results["phase1_analysis"] = phase1_results
-
-        # Check if we have enough successful results to continue
-        successful_results = [r for r in phase1_results.values()
-                            if r and r.status == AgentStatus.COMPLETED]
-
-        if len(successful_results) == 0:
-            self.logger.error("All diagnostic agents failed")
-            results["execution_summary"] = {
-                "status": "failed",
-                "error": "All diagnostic agents failed",
-                "execution_time_ms": (datetime.now() - start_time).total_seconds() * 1000
+        
+        # Create root span for entire RCA chain
+        with trace_span(
+            "rca_chain_execution",
+            attributes={
+                "incident_time": str(incident_data.get("incident_time")),
+                "affected_services": str(incident_data.get("affected_services", [])),
+                "use_llm": self.use_llm,
+                "filter_pii": self.filter_pii,
+                "log_count": len(incident_data.get("logs", [])),
+                "metric_count": len(incident_data.get("metrics", [])),
+                "change_count": len(incident_data.get("changes", []))
             }
+        ):
+            self.logger.info("Starting async RCA chain", incident_time=incident_data.get("incident_time"))
+
+            # Filter PII if enabled
+            if self.pii_filter and "logs" in incident_data:
+                with trace_span("pii_filtering"):
+                    incident_data["logs"] = self.pii_filter.filter_logs(incident_data["logs"])
+                    add_span_event("pii_filtered", {"filtered_log_count": len(incident_data["logs"])})
+                    self.logger.info("PII filtered from logs", log_count=len(incident_data["logs"]))
+
+            results = {
+                "phase1_analysis": None,
+                "phase2_hypothesis": None,
+                "phase3_remediation": None,
+                "execution_summary": {}
+            }
+
+            # Phase 1: Parallel diagnostic analysis
+            self.logger.info("Phase 1: Running diagnostic agents in parallel")
+            with trace_span("phase1_diagnostic_analysis"):
+                phase1_results = await self._execute_phase1_parallel(incident_data)
+                results["phase1_analysis"] = phase1_results
+                
+                # Add phase 1 summary to span
+                add_span_attributes({
+                    "phase1_agents_executed": len([r for r in phase1_results.values() if r]),
+                    "phase1_total_findings": sum(len(r.get("findings", [])) for r in phase1_results.values() if r)
+                })
+
+            # Check if we have enough successful results to continue
+            successful_results = [r for r in phase1_results.values()
+                                if r and r.status == AgentStatus.COMPLETED]
+
+            if len(successful_results) == 0:
+                self.logger.error("All diagnostic agents failed")
+                add_span_event("all_agents_failed")
+                results["execution_summary"] = {
+                    "status": "failed",
+                    "error": "All diagnostic agents failed",
+                    "execution_time_ms": (datetime.now() - start_time).total_seconds() * 1000
+                }
+                return results
+
+            self.logger.info(f"Phase 1 complete: {len(successful_results)}/{len(phase1_results)} agents succeeded")
+
+            # Phase 2: Hypothesis generation
+            self.logger.info("Phase 2: Generating hypotheses")
+            with trace_span("phase2_hypothesis_generation"):
+                phase2_result = await self._execute_phase2_hypothesis(phase1_results, incident_data)
+                results["phase2_hypothesis"] = phase2_result
+                
+                if phase2_result and phase2_result.findings:
+                    add_span_attributes({
+                        "phase2_hypotheses_count": len(phase2_result.findings),
+                        "phase2_status": phase2_result.status.value if hasattr(phase2_result, 'status') else "unknown"
+                    })
+
+            if phase2_result and phase2_result.status == AgentStatus.COMPLETED and phase2_result.findings:
+                self.logger.info(f"Generated {len(phase2_result.findings)} hypotheses")
+
+                # Phase 3: Remediation planning
+                self.logger.info("Phase 3: Creating remediation plan")
+                with trace_span("phase3_remediation_planning"):
+                    phase3_result = await self._execute_phase3_remediation(phase2_result, incident_data)
+                    results["phase3_remediation"] = phase3_result
+                    
+                    if phase3_result and phase3_result.findings:
+                        add_span_attributes({
+                            "phase3_remediation_plans_count": len(phase3_result.findings),
+                            "phase3_status": phase3_result.status.value if hasattr(phase3_result, 'status') else "unknown"
+                        })
+
+                if phase3_result and phase3_result.status == AgentStatus.COMPLETED:
+                    self.logger.info(f"Generated {len(phase3_result.findings)} remediation plans")
+            else:
+                self.logger.warning("Phase 2 failed or produced no hypotheses. Skipping remediation")
+
+            # Execution summary
+            execution_time = (datetime.now() - start_time).total_seconds() * 1000
+            results["execution_summary"] = {
+                "status": "completed",
+                "total_agents": 6,
+                "successful_agents": len(successful_results) + (1 if phase2_result and phase2_result.status == AgentStatus.COMPLETED else 0),
+                "execution_time_ms": execution_time,
+                "phases_completed": 3 if results["phase3_remediation"] else (2 if results["phase2_hypothesis"] else 1),
+                "llm_enabled": self.use_llm,
+                "pii_filtering": self.filter_pii
+            }
+            
+            # Add final summary to span
+            add_span_attributes({
+                "total_execution_time_ms": execution_time,
+                "phases_completed": results["execution_summary"]["phases_completed"],
+                "successful_agents": results["execution_summary"]["successful_agents"]
+            })
+
+            self.logger.info(f"Async RCA chain complete in {execution_time:.0f}ms")
             return results
-
-        self.logger.info(f"Phase 1 complete: {len(successful_results)}/{len(phase1_results)} agents succeeded")
-
-        # Phase 2: Hypothesis generation
-        self.logger.info("Phase 2: Generating hypotheses")
-        phase2_result = await self._execute_phase2_hypothesis(phase1_results, incident_data)
-        results["phase2_hypothesis"] = phase2_result
-
-        if phase2_result and phase2_result.status == AgentStatus.COMPLETED and phase2_result.findings:
-            self.logger.info(f"Generated {len(phase2_result.findings)} hypotheses")
-
-            # Phase 3: Remediation planning
-            self.logger.info("Phase 3: Creating remediation plan")
-            phase3_result = await self._execute_phase3_remediation(phase2_result, incident_data)
-            results["phase3_remediation"] = phase3_result
-
-            if phase3_result and phase3_result.status == AgentStatus.COMPLETED:
-                self.logger.info(f"Generated {len(phase3_result.findings)} remediation plans")
-        else:
-            self.logger.warning("Phase 2 failed or produced no hypotheses. Skipping remediation")
-
-        # Execution summary
-        execution_time = (datetime.now() - start_time).total_seconds() * 1000
-        results["execution_summary"] = {
-            "status": "completed",
-            "total_agents": 6,
-            "successful_agents": len(successful_results) + (1 if phase2_result and phase2_result.status == AgentStatus.COMPLETED else 0),
-            "execution_time_ms": execution_time,
-            "phases_completed": 3 if results["phase3_remediation"] else (2 if results["phase2_hypothesis"] else 1),
-            "llm_enabled": self.use_llm,
-            "pii_filtering": self.filter_pii
-        }
-
-        self.logger.info(f"Async RCA chain complete in {execution_time:.0f}ms")
-        return results
 
     async def _execute_phase1_parallel(self, incident_data: Dict) -> Dict[str, BaseAgentOutput]:
         """Execute phase 1: parallel diagnostic analysis using asyncio.gather"""
@@ -212,30 +258,52 @@ class AsyncAgentOrchestrator:
         return results
 
     async def _execute_agent_safe(self, agent, key: str, context_data: Dict, parameters: Dict) -> BaseAgentOutput:
-        """Execute single agent with error handling"""
-        try:
-            input_data = BaseAgentInput(
-                context=context_data,
-                parameters=parameters
-            )
-            # Use execute_async if available, otherwise fallback to sync execute
-            if hasattr(agent, 'execute_async'):
-                result = await agent.execute_async(input_data)
-            else:
-                # For agents not yet upgraded, run sync version in thread pool
-                loop = asyncio.get_event_loop()
-                result = await loop.run_in_executor(None, agent.execute, input_data)
+        """Execute single agent with error handling and tracing"""
+        with trace_span(
+            f"agent_execution_{key}",
+            attributes={
+                "agent_name": agent.name if hasattr(agent, 'name') else key,
+                "agent_type": type(agent).__name__,
+                "context_keys": str(list(context_data.keys())),
+                "use_llm": self.use_llm
+            }
+        ):
+            try:
+                input_data = BaseAgentInput(
+                    context=context_data,
+                    parameters=parameters
+                )
+                
+                add_span_event("agent_input_prepared", {"context_size": len(context_data)})
+                
+                # Use execute_async if available, otherwise fallback to sync execute
+                if hasattr(agent, 'execute_async'):
+                    result = await agent.execute_async(input_data)
+                else:
+                    # For agents not yet upgraded, run sync version in thread pool
+                    loop = asyncio.get_event_loop()
+                    result = await loop.run_in_executor(None, agent.execute, input_data)
 
-            self.logger.info(f"{key} completed successfully",
-                           findings_count=len(result.findings),
-                           execution_time_ms=result.execution_time_ms)
-            return result
+                # Add execution results to span
+                add_span_attributes({
+                    "findings_count": len(result.findings),
+                    "execution_time_ms": result.execution_time_ms if hasattr(result, 'execution_time_ms') else 0,
+                    "status": result.status.value if hasattr(result, 'status') else "unknown",
+                    "confidence": result.confidence.value if hasattr(result, 'confidence') else "unknown"
+                })
+                
+                self.logger.info(f"{key} completed successfully",
+                               findings_count=len(result.findings),
+                               execution_time_ms=result.execution_time_ms if hasattr(result, 'execution_time_ms') else 0)
+                return result
 
-        except Exception as e:
-            self.logger.error(f"{key} failed", error=str(e))
-            if self.error_strategy == "fail_fast":
-                raise
-            return self._create_error_result(agent.name, str(e))
+            except Exception as e:
+                self.logger.error(f"{key} failed", error=str(e))
+                add_span_event("agent_execution_failed", {"error": str(e)})
+                
+                if self.error_strategy == "fail_fast":
+                    raise
+                return self._create_error_result(agent.name, str(e))
 
     async def _execute_phase2_hypothesis(self, phase1_results: Dict, incident_data: Dict) -> Optional[BaseAgentOutput]:
         """Execute phase 2: hypothesis generation"""
