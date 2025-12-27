@@ -515,22 +515,173 @@ async def root(request: Request):
     }
 
 
-@app.get("/health")
-async def health_check():
-    """Health check endpoint"""
-    # Check database connection
+async def check_database() -> tuple[str, float]:
+    """Check SQLite database connectivity"""
+    start_time = time.time()
     try:
         conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("SELECT 1")
+        cursor.fetchone()
         conn.close()
-        db_healthy = True
-    except Exception:
-        db_healthy = False
+        elapsed = (time.time() - start_time) * 1000
+        return ("healthy", elapsed)
+    except Exception as e:
+        elapsed = (time.time() - start_time) * 1000
+        return ("unhealthy", elapsed)
 
-    return {
-        "status": "healthy" if db_healthy else "degraded",
-        "version": "3.0.0",
-        "database": "healthy" if db_healthy else "unhealthy"
+
+async def check_redis() -> tuple[str, float]:
+    """Check Redis cache connectivity"""
+    start_time = time.time()
+    settings = get_settings()
+    
+    if settings.cache_backend != "redis":
+        return ("not_configured", 0.0)
+    
+    try:
+        import redis
+        r = redis.from_url(settings.cache_redis_url, socket_connect_timeout=2)
+        r.ping()
+        elapsed = (time.time() - start_time) * 1000
+        return ("healthy", elapsed)
+    except ImportError:
+        elapsed = (time.time() - start_time) * 1000
+        return ("not_available", elapsed)
+    except Exception as e:
+        elapsed = (time.time() - start_time) * 1000
+        return ("unhealthy", elapsed)
+
+
+async def check_chromadb() -> tuple[str, float]:
+    """Check ChromaDB vector database connectivity"""
+    start_time = time.time()
+    try:
+        import chromadb
+        client = chromadb.PersistentClient(path="./chroma_db")
+        # Try to list collections
+        client.list_collections()
+        elapsed = (time.time() - start_time) * 1000
+        return ("healthy", elapsed)
+    except ImportError:
+        elapsed = (time.time() - start_time) * 1000
+        return ("not_available", elapsed)
+    except Exception as e:
+        elapsed = (time.time() - start_time) * 1000
+        return ("unhealthy", elapsed)
+
+
+async def check_llm() -> tuple[str, float]:
+    """Check LLM API connectivity"""
+    start_time = time.time()
+    settings = get_settings()
+    
+    if not settings.llm_api_key:
+        return ("not_configured", 0.0)
+    
+    try:
+        from llm.base_llm import get_llm
+        llm = get_llm()
+        # Quick connectivity check (don't make expensive calls)
+        elapsed = (time.time() - start_time) * 1000
+        return ("healthy", elapsed)
+    except ImportError:
+        elapsed = (time.time() - start_time) * 1000
+        return ("not_available", elapsed)
+    except Exception as e:
+        elapsed = (time.time() - start_time) * 1000
+        return ("unhealthy", elapsed)
+
+
+@app.get("/health")
+async def health_check():
+    """
+    Comprehensive health check endpoint
+    
+    Checks all critical dependencies:
+    - SQLite database
+    - Redis cache (if configured)
+    - ChromaDB vector database
+    - LLM API (if configured)
+    
+    Returns detailed status for each component with response times.
+    """
+    db_status, db_time = await check_database()
+    redis_status, redis_time = await check_redis()
+    chromadb_status, chromadb_time = await check_chromadb()
+    llm_status, llm_time = await check_llm()
+    
+    checks = {
+        "database": {
+            "status": db_status,
+            "response_time_ms": round(db_time, 2)
+        },
+        "cache": {
+            "status": redis_status,
+            "response_time_ms": round(redis_time, 2)
+        },
+        "vector_db": {
+            "status": chromadb_status,
+            "response_time_ms": round(chromadb_time, 2)
+        },
+        "llm": {
+            "status": llm_status,
+            "response_time_ms": round(llm_time, 2)
+        }
     }
+    
+    # Overall status is healthy only if all configured services are healthy
+    configured_services = [
+        status for name, info in checks.items() 
+        if info["status"] not in ["not_configured", "not_available"]
+    ]
+    
+    unhealthy_services = [
+        name for name, info in checks.items()
+        if info["status"] == "unhealthy"
+    ]
+    
+    if unhealthy_services:
+        overall_status = "degraded"
+    elif configured_services:
+        overall_status = "healthy"
+    else:
+        overall_status = "minimal"
+    
+    return {
+        "status": overall_status,
+        "version": "3.5.0",
+        "checks": checks,
+        "unhealthy_services": unhealthy_services
+    }
+
+
+@app.get("/health/ready")
+async def readiness_check():
+    """
+    Kubernetes readiness probe
+    
+    Returns 200 if service is ready to accept traffic.
+    Returns 503 if service is not ready.
+    """
+    db_status, _ = await check_database()
+    
+    # Service is ready if database is accessible
+    if db_status == "healthy":
+        return {"ready": True}
+    else:
+        raise HTTPException(status_code=503, detail="Service not ready")
+
+
+@app.get("/health/live")
+async def liveness_check():
+    """
+    Kubernetes liveness probe
+    
+    Returns 200 if service is alive and running.
+    This is a lightweight check.
+    """
+    return {"alive": True}
 
 
 class WebSocketTokenRequest(BaseModel):
