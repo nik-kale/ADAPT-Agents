@@ -32,7 +32,7 @@ from datetime import datetime
 from collections import defaultdict
 from contextlib import asynccontextmanager
 from config.settings import get_settings
-from api.auth import get_api_key
+from api.auth import get_api_key, generate_ws_token
 from utils.rate_limiter import rate_limiter
 
 # Import WebSocket routes
@@ -451,6 +451,47 @@ async def health_check():
         "status": "healthy" if db_healthy else "degraded",
         "version": "3.0.0",
         "database": "healthy" if db_healthy else "unhealthy"
+    }
+
+
+class WebSocketTokenRequest(BaseModel):
+    """Request to generate WebSocket token"""
+    analysis_ids: Optional[List[str]] = None
+
+
+@app.post("/ws/token")
+async def create_websocket_token(
+    token_request: WebSocketTokenRequest = WebSocketTokenRequest(),
+    api_key: str = Depends(get_api_key)
+):
+    """
+    Generate WebSocket authentication token
+
+    Creates a short-lived token (15 minutes) for WebSocket connections.
+    Optionally restrict token to specific analysis IDs.
+
+    Requires X-API-Key header for authentication.
+
+    Example:
+    ```bash
+    curl -X POST http://localhost:8000/ws/token \
+      -H "X-API-Key: your-key" \
+      -H "Content-Type: application/json" \
+      -d '{"analysis_ids": ["abc-123"]}'
+    ```
+
+    Then use the token in WebSocket connection:
+    ```javascript
+    const ws = new WebSocket('ws://localhost:8000/ws/analysis/abc-123?token=...');
+    ```
+    """
+    token = generate_ws_token(api_key, token_request.analysis_ids)
+
+    return {
+        "token": token,
+        "expires_in_minutes": 15,
+        "analysis_ids": token_request.analysis_ids or [],
+        "message": "Token generated successfully. Use as query parameter: ?token=..."
     }
 
 
