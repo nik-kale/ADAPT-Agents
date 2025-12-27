@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from typing import Dict, Optional, List, Any
 
 from visualization import RootCauseGraphGenerator, TimelineChartGenerator, MetricsDashboardGenerator
+from api.auth import get_api_key
 
 
 router = APIRouter()
@@ -37,7 +38,7 @@ class MetricsDashboardRequest(BaseModel):
 @router.post("/visualizations/root-cause-graph", tags=["visualizations"])
 async def generate_root_cause_graph(
     request: RCAVisualizationRequest,
-    api_key: str = Depends(lambda: "demo-key-12345")
+    api_key: str = Depends(get_api_key)
 ):
     """
     Generate interactive root cause dependency graph
@@ -96,7 +97,7 @@ async def generate_root_cause_graph(
 @router.post("/visualizations/timeline", tags=["visualizations"])
 async def generate_timeline(
     request: TimelineRequest,
-    api_key: str = Depends(lambda: "demo-key-12345")
+    api_key: str = Depends(get_api_key)
 ):
     """
     Generate interactive incident timeline
@@ -164,7 +165,7 @@ async def generate_timeline(
 @router.post("/visualizations/metrics-dashboard", tags=["visualizations"])
 async def generate_metrics_dashboard(
     request: MetricsDashboardRequest,
-    api_key: str = Depends(lambda: "demo-key-12345")
+    api_key: str = Depends(get_api_key)
 ):
     """
     Generate interactive metrics dashboard
@@ -234,7 +235,7 @@ async def generate_metrics_dashboard(
 async def generate_complete_dashboard(
     incident_data: Dict[str, Any],
     rca_results: Dict[str, Any],
-    api_key: str = Depends(lambda: "demo-key-12345")
+    api_key: str = Depends(get_api_key)
 ):
     """
     Generate complete visualization dashboard for an incident

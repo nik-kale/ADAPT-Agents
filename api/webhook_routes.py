@@ -9,6 +9,7 @@ from typing import List, Dict, Optional
 import uuid
 
 from api.webhook_manager import webhook_manager
+from api.auth import get_api_key
 
 router = APIRouter()
 
@@ -31,7 +32,7 @@ class WebhookUpdate(BaseModel):
 @router.post("/webhooks", tags=["webhooks"])
 async def create_webhook(
     webhook_data: WebhookCreate,
-    api_key: str = Depends(lambda: "demo-key-12345")  # Simplified, use real auth
+    api_key: str = Depends(get_api_key)
 ):
     """
     Create new webhook subscription
@@ -77,7 +78,7 @@ async def create_webhook(
 
 @router.get("/webhooks", tags=["webhooks"])
 async def list_webhooks(
-    api_key: str = Depends(lambda: "demo-key-12345")
+    api_key: str = Depends(get_api_key)
 ):
     """
     List all webhooks for the authenticated API key
@@ -95,7 +96,7 @@ async def list_webhooks(
 @router.get("/webhooks/{webhook_id}", tags=["webhooks"])
 async def get_webhook(
     webhook_id: str,
-    api_key: str = Depends(lambda: "demo-key-12345")
+    api_key: str = Depends(get_api_key)
 ):
     """
     Get webhook details by ID
@@ -120,7 +121,7 @@ async def get_webhook(
 async def update_webhook(
     webhook_id: str,
     updates: WebhookUpdate,
-    api_key: str = Depends(lambda: "demo-key-12345")
+    api_key: str = Depends(get_api_key)
 ):
     """
     Update webhook configuration
@@ -149,7 +150,7 @@ async def update_webhook(
 @router.delete("/webhooks/{webhook_id}", tags=["webhooks"])
 async def delete_webhook(
     webhook_id: str,
-    api_key: str = Depends(lambda: "demo-key-12345")
+    api_key: str = Depends(get_api_key)
 ):
     """
     Delete webhook subscription
@@ -173,7 +174,7 @@ async def delete_webhook(
 async def get_webhook_deliveries(
     webhook_id: str,
     limit: int = 50,
-    api_key: str = Depends(lambda: "demo-key-12345")
+    api_key: str = Depends(get_api_key)
 ):
     """
     Get delivery history for a webhook
@@ -202,7 +203,7 @@ async def get_webhook_deliveries(
 @router.post("/webhooks/{webhook_id}/test", tags=["webhooks"])
 async def test_webhook(
     webhook_id: str,
-    api_key: str = Depends(lambda: "demo-key-12345")
+    api_key: str = Depends(get_api_key)
 ):
     """
     Test webhook by sending a test event
