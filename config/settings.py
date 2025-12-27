@@ -91,6 +91,12 @@ class AgentSettings(BaseSettings):
     # === Performance Settings ===
     max_parallel_agents: int = 10
     agent_pool_size: int = 5
+    
+    # === Data Retention Settings ===
+    data_retention_days: int = 90
+    cleanup_batch_size: int = 100
+    enable_auto_cleanup: bool = True
+    cleanup_schedule_hours: int = 24  # Run cleanup every N hours
 
     class Config:
         env_file = ".env"
