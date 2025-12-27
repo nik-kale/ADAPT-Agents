@@ -160,6 +160,27 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"⚠️  Metrics server warning: {e}")
     
+    # Initialize OpenTelemetry tracing if enabled
+    try:
+        if settings.enable_tracing and settings.otel_endpoint:
+            from utils.tracing import init_tracing
+            from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+            
+            # Initialize tracing
+            if init_tracing(
+                service_name=settings.otel_service_name,
+                otlp_endpoint=settings.otel_endpoint
+            ):
+                # Instrument FastAPI app
+                FastAPIInstrumentor.instrument_app(app)
+                print(f"✓ OpenTelemetry tracing enabled: {settings.otel_endpoint}")
+            else:
+                print("⚠️  OpenTelemetry tracing initialization failed")
+        elif settings.enable_tracing:
+            print("⚠️  Tracing enabled but OTEL endpoint not configured")
+    except Exception as e:
+        print(f"⚠️  Tracing initialization warning: {e}")
+    
     # Start cleanup scheduler if enabled
     cleanup_task = None
     try:
@@ -175,6 +196,14 @@ async def lifespan(app: FastAPI):
 
     # Shutdown
     print("\n🛑 Shutting down gracefully...")
+
+    # Shutdown tracing
+    try:
+        if settings.enable_tracing:
+            from utils.tracing import shutdown_tracing
+            shutdown_tracing()
+    except Exception:
+        pass
 
     # Cancel cleanup task if running
     if cleanup_task and not cleanup_task.done():
