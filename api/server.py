@@ -15,7 +15,7 @@ Provides REST API for agent execution with:
 - Configuration validation
 """
 
-from fastapi import FastAPI, BackgroundTasks, HTTPException, Depends, Request
+from fastapi import FastAPI, BackgroundTasks, HTTPException, Depends, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, validator, field_validator, HttpUrl
@@ -242,6 +242,35 @@ async def add_request_id(request: Request, call_next):
     response = await call_next(request)
     response.headers["X-Request-ID"] = request_id
 
+    return response
+
+
+# Rate limit headers middleware
+@app.middleware("http")
+async def add_rate_limit_headers(request: Request, call_next):
+    """Add rate limit headers to all responses"""
+    response = await call_next(request)
+    
+    # Try to get API key from request if it was authenticated
+    api_key_header = request.headers.get("X-API-Key")
+    if api_key_header:
+        try:
+            from api.auth import get_api_key_info
+            key_info = get_api_key_info(api_key_header)
+            tier = key_info.get('tier', 'free')
+            
+            # Get rate limit info
+            limit_info = rate_limiter.get_limit_info(api_key_header, tier)
+            
+            # Add headers
+            response.headers["X-RateLimit-Limit"] = str(limit_info['limit'])
+            response.headers["X-RateLimit-Remaining"] = str(limit_info['remaining'])
+            response.headers["X-RateLimit-Reset"] = str(limit_info['window_seconds'])
+            response.headers["X-RateLimit-Tier"] = tier
+        except Exception:
+            # Silently fail if rate limit info can't be retrieved
+            pass
+    
     return response
 
 
