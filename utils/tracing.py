@@ -32,17 +32,17 @@ def init_tracing(
 ) -> bool:
     """
     Initialize OpenTelemetry tracing
-    
+
     Args:
         service_name: Name of the service for trace identification
         otlp_endpoint: OTLP collector endpoint (e.g., "http://localhost:4317")
         enable_console_export: Whether to also export traces to console
-    
+
     Returns:
         True if tracing initialized successfully, False otherwise
     """
     global _tracer, _tracer_provider
-    
+
     try:
         # Create resource with service information
         resource = Resource(attributes={
@@ -50,33 +50,33 @@ def init_tracing(
             "service.version": "3.5.0",
             "deployment.environment": "production"
         })
-        
+
         # Create tracer provider
         _tracer_provider = TracerProvider(resource=resource)
-        
+
         # Add OTLP exporter if endpoint provided
         if otlp_endpoint:
             otlp_exporter = OTLPSpanExporter(endpoint=otlp_endpoint, insecure=True)
             span_processor = BatchSpanProcessor(otlp_exporter)
             _tracer_provider.add_span_processor(span_processor)
             logger.info(f"OTLP exporter configured: {otlp_endpoint}")
-        
+
         # Add console exporter if requested (for debugging)
         if enable_console_export:
             from opentelemetry.sdk.trace.export import ConsoleSpanExporter
             console_exporter = ConsoleSpanExporter()
             _tracer_provider.add_span_processor(BatchSpanProcessor(console_exporter))
             logger.info("Console span exporter enabled")
-        
+
         # Set global tracer provider
         trace.set_tracer_provider(_tracer_provider)
-        
+
         # Create tracer
         _tracer = trace.get_tracer(__name__)
-        
+
         logger.info(f"OpenTelemetry tracing initialized for service: {service_name}")
         return True
-        
+
     except Exception as e:
         logger.error(f"Failed to initialize OpenTelemetry tracing: {e}")
         return False
@@ -85,18 +85,18 @@ def init_tracing(
 def get_tracer() -> trace.Tracer:
     """Get the global tracer instance"""
     global _tracer
-    
+
     if _tracer is None:
         # Initialize with defaults if not already initialized
         init_tracing()
-    
+
     return _tracer
 
 
 def shutdown_tracing():
     """Shutdown tracing and flush pending spans"""
     global _tracer_provider
-    
+
     if _tracer_provider:
         try:
             _tracer_provider.shutdown()
@@ -113,12 +113,12 @@ def trace_span(
 ):
     """
     Context manager for creating trace spans
-    
+
     Args:
         name: Span name (e.g., "agent_execution", "llm_generate")
         attributes: Optional span attributes
         kind: Span kind (INTERNAL, CLIENT, SERVER, PRODUCER, CONSUMER)
-    
+
     Usage:
         ```python
         with trace_span("analyze_logs", {"log_count": 100}):
@@ -127,7 +127,7 @@ def trace_span(
         ```
     """
     tracer = get_tracer()
-    
+
     with tracer.start_as_current_span(name, kind=kind) as span:
         # Add attributes if provided
         if attributes:
@@ -137,7 +137,7 @@ def trace_span(
                     span.set_attribute(key, str(value))
                 elif value is not None:
                     span.set_attribute(key, value)
-        
+
         try:
             yield span
         except Exception as e:
@@ -153,11 +153,11 @@ def trace_async_function(
 ):
     """
     Decorator for tracing async functions
-    
+
     Args:
         span_name: Optional custom span name (defaults to function name)
         attributes: Optional span attributes
-    
+
     Usage:
         ```python
         @trace_async_function(attributes={"component": "log_analyzer"})
@@ -170,10 +170,10 @@ def trace_async_function(
         @wraps(func)
         async def wrapper(*args, **kwargs):
             name = span_name or f"{func.__module__}.{func.__name__}"
-            
+
             with trace_span(name, attributes):
                 return await func(*args, **kwargs)
-        
+
         return wrapper
     return decorator
 
@@ -184,7 +184,7 @@ def trace_function(
 ):
     """
     Decorator for tracing synchronous functions
-    
+
     Args:
         span_name: Optional custom span name (defaults to function name)
         attributes: Optional span attributes
@@ -193,10 +193,10 @@ def trace_function(
         @wraps(func)
         def wrapper(*args, **kwargs):
             name = span_name or f"{func.__module__}.{func.__name__}"
-            
+
             with trace_span(name, attributes):
                 return func(*args, **kwargs)
-        
+
         return wrapper
     return decorator
 
@@ -204,7 +204,7 @@ def trace_function(
 def add_span_attributes(attributes: Dict[str, Any]):
     """
     Add attributes to the current active span
-    
+
     Args:
         attributes: Dictionary of attributes to add
     """
@@ -220,7 +220,7 @@ def add_span_attributes(attributes: Dict[str, Any]):
 def add_span_event(name: str, attributes: Optional[Dict[str, Any]] = None):
     """
     Add an event to the current active span
-    
+
     Args:
         name: Event name
         attributes: Optional event attributes
@@ -233,7 +233,7 @@ def add_span_event(name: str, attributes: Optional[Dict[str, Any]] = None):
 def set_span_error(error: Exception):
     """
     Mark current span as error and record exception
-    
+
     Args:
         error: Exception to record
     """
@@ -246,10 +246,10 @@ def set_span_error(error: Exception):
 def inject_trace_context(carrier: Dict[str, str]) -> Dict[str, str]:
     """
     Inject trace context into a carrier (e.g., HTTP headers)
-    
+
     Args:
         carrier: Dictionary to inject context into
-    
+
     Returns:
         Carrier with injected trace context
     """
@@ -261,10 +261,10 @@ def inject_trace_context(carrier: Dict[str, str]) -> Dict[str, str]:
 def extract_trace_context(carrier: Dict[str, str]):
     """
     Extract trace context from a carrier (e.g., HTTP headers)
-    
+
     Args:
         carrier: Dictionary containing trace context
-    
+
     Returns:
         Extracted context
     """
@@ -274,15 +274,15 @@ def extract_trace_context(carrier: Dict[str, str]):
 
 class TracingConfig:
     """Configuration for tracing"""
-    
+
     def __init__(self):
         from config.settings import get_settings
         settings = get_settings()
-        
+
         self.enabled = settings.enable_tracing
         self.otlp_endpoint = settings.otel_endpoint
         self.service_name = settings.otel_service_name
-    
+
     def is_enabled(self) -> bool:
         """Check if tracing is enabled"""
         return self.enabled and self.otlp_endpoint is not None
