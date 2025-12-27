@@ -9,6 +9,7 @@ from typing import List, Dict, Optional, Any
 import uuid
 
 from rag import VectorDBManager, IncidentEmbeddingService, SimilaritySearchService, RAGEnhancer
+from api.auth import get_api_key
 
 
 router = APIRouter()
@@ -83,7 +84,7 @@ class SimilarFindingsRequest(BaseModel):
 @router.post("/knowledge-base/incidents", tags=["knowledge-base"])
 async def store_incident(
     request: IncidentStorageRequest,
-    api_key: str = Depends(lambda: "demo-key-12345")  # Use real auth
+    api_key: str = Depends(get_api_key)  # Use real auth
 ):
     """
     Store incident in knowledge base for future similarity search
@@ -182,7 +183,7 @@ async def store_incident(
 @router.post("/knowledge-base/search/similar-incidents", tags=["knowledge-base"])
 async def search_similar_incidents(
     request: SimilarIncidentsRequest,
-    api_key: str = Depends(lambda: "demo-key-12345")
+    api_key: str = Depends(get_api_key)
 ):
     """
     Find similar historical incidents using semantic search
@@ -228,7 +229,7 @@ async def search_similar_incidents(
 @router.post("/knowledge-base/search/similar-findings", tags=["knowledge-base"])
 async def search_similar_findings(
     request: SimilarFindingsRequest,
-    api_key: str = Depends(lambda: "demo-key-12345")
+    api_key: str = Depends(get_api_key)
 ):
     """
     Find similar findings from past agent analyses
@@ -260,7 +261,7 @@ async def search_similar_findings(
 @router.get("/knowledge-base/incidents/{incident_id}", tags=["knowledge-base"])
 async def get_incident(
     incident_id: str,
-    api_key: str = Depends(lambda: "demo-key-12345")
+    api_key: str = Depends(get_api_key)
 ):
     """
     Retrieve incident from knowledge base by ID
@@ -290,7 +291,7 @@ async def get_incident(
 @router.get("/knowledge-base/incidents/{incident_id}/insights", tags=["knowledge-base"])
 async def get_incident_insights(
     incident_id: str,
-    api_key: str = Depends(lambda: "demo-key-12345")
+    api_key: str = Depends(get_api_key)
 ):
     """
     Get comprehensive insights about a stored incident
@@ -321,7 +322,7 @@ async def get_incident_insights(
 @router.delete("/knowledge-base/incidents/{incident_id}", tags=["knowledge-base"])
 async def delete_incident(
     incident_id: str,
-    api_key: str = Depends(lambda: "demo-key-12345")
+    api_key: str = Depends(get_api_key)
 ):
     """
     Delete incident from knowledge base
@@ -350,7 +351,7 @@ async def delete_incident(
 
 @router.get("/knowledge-base/stats", tags=["knowledge-base"])
 async def get_knowledge_base_stats(
-    api_key: str = Depends(lambda: "demo-key-12345")
+    api_key: str = Depends(get_api_key)
 ):
     """
     Get statistics about the knowledge base
@@ -383,7 +384,7 @@ async def enhance_prompt_with_rag(
     incident_data: Dict[str, Any],
     base_prompt: str,
     agent_name: Optional[str] = None,
-    api_key: str = Depends(lambda: "demo-key-12345")
+    api_key: str = Depends(get_api_key)
 ):
     """
     Enhance an LLM prompt with RAG context

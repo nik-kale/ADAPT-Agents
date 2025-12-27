@@ -2,8 +2,10 @@
 Configuration management for ADAPT-Agents
 """
 from pydantic_settings import BaseSettings
+from pydantic import Field, field_validator
 from typing import Optional, Dict, Any
 from pathlib import Path
+import json
 
 
 class AgentSettings(BaseSettings):
@@ -71,6 +73,20 @@ class AgentSettings(BaseSettings):
     enable_pii_filtering: bool = True
     enable_audit_logging: bool = False
     audit_log_path: Optional[str] = None
+    
+    # API Key Management
+    api_keys: Dict[str, Dict[str, str]] = Field(default_factory=dict)
+    
+    @field_validator('api_keys', mode='before')
+    @classmethod
+    def parse_api_keys(cls, v):
+        """Parse API keys from JSON string or dict"""
+        if isinstance(v, str):
+            try:
+                return json.loads(v)
+            except json.JSONDecodeError:
+                return {}
+        return v or {}
 
     # === Performance Settings ===
     max_parallel_agents: int = 10

@@ -15,9 +15,8 @@ Provides REST API for agent execution with:
 - Configuration validation
 """
 
-from fastapi import FastAPI, BackgroundTasks, HTTPException, Depends, Security, Request
+from fastapi import FastAPI, BackgroundTasks, HTTPException, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.security import APIKeyHeader
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, validator
 from typing import Dict, Any, List, Optional
@@ -28,9 +27,13 @@ import sqlite3
 import json
 import signal
 import sys
+import logging
 from datetime import datetime
 from collections import defaultdict
 from contextlib import asynccontextmanager
+from config.settings import get_settings
+from api.auth import get_api_key
+from utils.rate_limiter import rate_limiter
 
 # Import WebSocket routes
 try:
@@ -75,12 +78,6 @@ except ImportError:
 # Rate limiting configuration
 RATE_LIMIT_REQUESTS = 100  # requests per minute per API key
 RATE_LIMIT_WINDOW = 60  # seconds
-
-# API Key configuration (in production, use environment variables or secrets manager)
-VALID_API_KEYS = {
-    "demo-key-12345": {"name": "demo", "tier": "free"},
-    "prod-key-67890": {"name": "production", "tier": "premium"}
-}
 
 # Database configuration
 DB_PATH = "adapt_agents.db"
@@ -129,43 +126,7 @@ def init_database():
     conn.close()
 
 
-# === Rate Limiting ===
-
-class RateLimiter:
-    """Simple in-memory rate limiter"""
-
-    def __init__(self):
-        self.requests = defaultdict(list)
-
-    def is_allowed(self, api_key: str) -> bool:
-        """Check if request is allowed under rate limit"""
-        now = time.time()
-
-        # Clean old requests
-        self.requests[api_key] = [
-            req_time for req_time in self.requests[api_key]
-            if now - req_time < RATE_LIMIT_WINDOW
-        ]
-
-        # Check limit
-        if len(self.requests[api_key]) >= RATE_LIMIT_REQUESTS:
-            return False
-
-        # Add new request
-        self.requests[api_key].append(now)
-        return True
-
-    def get_remaining(self, api_key: str) -> int:
-        """Get remaining requests in current window"""
-        now = time.time()
-        active_requests = [
-            req_time for req_time in self.requests[api_key]
-            if now - req_time < RATE_LIMIT_WINDOW
-        ]
-        return max(0, RATE_LIMIT_REQUESTS - len(active_requests))
-
-
-rate_limiter = RateLimiter()
+# Rate limiting is now handled in utils/rate_limiter.py
 
 
 # === Lifespan Context Manager ===
@@ -268,25 +229,7 @@ async def add_request_id(request: Request, call_next):
 
 # === Authentication ===
 
-api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
-
-
-async def get_api_key(api_key: str = Security(api_key_header)) -> str:
-    """Validate API key"""
-    if not api_key or api_key not in VALID_API_KEYS:
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid or missing API key. Provide X-API-Key header."
-        )
-
-    # Check rate limit
-    if not rate_limiter.is_allowed(api_key):
-        raise HTTPException(
-            status_code=429,
-            detail=f"Rate limit exceeded. Limit: {RATE_LIMIT_REQUESTS} requests per {RATE_LIMIT_WINDOW}s"
-        )
-
-    return api_key
+# API key validation is handled in api/auth.py
 
 
 # === Database Operations ===

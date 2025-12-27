@@ -9,6 +9,7 @@ from typing import Dict, Optional, List, Any
 import uuid
 
 from integrations.integration_manager import integration_manager
+from api.auth import get_api_key
 
 
 router = APIRouter()
@@ -58,7 +59,7 @@ class NotifyRCARequest(BaseModel):
 @router.post("/integrations/slack", tags=["integrations"])
 async def create_slack_integration(
     integration: SlackIntegrationCreate,
-    api_key: str = Depends(lambda: "demo-key-12345")
+    api_key: str = Depends(get_api_key)
 ):
     """
     Configure Slack integration
@@ -103,7 +104,7 @@ async def create_slack_integration(
 @router.post("/integrations/jira", tags=["integrations"])
 async def create_jira_integration(
     integration: JiraIntegrationCreate,
-    api_key: str = Depends(lambda: "demo-key-12345")
+    api_key: str = Depends(get_api_key)
 ):
     """
     Configure JIRA integration
@@ -145,7 +146,7 @@ async def create_jira_integration(
 @router.post("/integrations/pagerduty", tags=["integrations"])
 async def create_pagerduty_integration(
     integration: PagerDutyIntegrationCreate,
-    api_key: str = Depends(lambda: "demo-key-12345")
+    api_key: str = Depends(get_api_key)
 ):
     """
     Configure PagerDuty integration
@@ -184,7 +185,7 @@ async def create_pagerduty_integration(
 
 @router.get("/integrations", tags=["integrations"])
 async def list_integrations(
-    api_key: str = Depends(lambda: "demo-key-12345")
+    api_key: str = Depends(get_api_key)
 ):
     """
     List all configured integrations
@@ -206,7 +207,7 @@ async def list_integrations(
 @router.delete("/integrations/{integration_id}", tags=["integrations"])
 async def delete_integration(
     integration_id: str,
-    api_key: str = Depends(lambda: "demo-key-12345")
+    api_key: str = Depends(get_api_key)
 ):
     """
     Delete integration
@@ -233,7 +234,7 @@ async def delete_integration(
 @router.post("/integrations/notify/incident", tags=["integrations"])
 async def notify_incident(
     request: NotifyIncidentRequest,
-    api_key: str = Depends(lambda: "demo-key-12345")
+    api_key: str = Depends(get_api_key)
 ):
     """
     Notify all configured integrations about an incident
@@ -282,7 +283,7 @@ async def notify_incident(
 @router.post("/integrations/notify/rca-complete", tags=["integrations"])
 async def notify_rca_complete(
     request: NotifyRCARequest,
-    api_key: str = Depends(lambda: "demo-key-12345")
+    api_key: str = Depends(get_api_key)
 ):
     """
     Notify integrations about RCA completion
@@ -325,7 +326,7 @@ async def notify_rca_complete(
 
 @router.post("/integrations/test", tags=["integrations"])
 async def test_integrations(
-    api_key: str = Depends(lambda: "demo-key-12345")
+    api_key: str = Depends(get_api_key)
 ):
     """
     Test all configured integrations
