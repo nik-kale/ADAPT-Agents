@@ -52,6 +52,7 @@ setup(
             "prometheus-client>=0.19.0",
             "opentelemetry-api>=1.22.0",
             "opentelemetry-sdk>=1.22.0",
+            "opentelemetry-exporter-otlp>=1.22.0",
         ],
         "dev": [
             "pytest>=7.4.0",

@@ -46,8 +46,11 @@ class ChangeCorrelatorAgentInput(BaseAgentInput):
                         f'change entry at index {idx} must contain "type" or "change_type" field'
                     )
         
-        # Validate incident_time if present
-        if 'incident_time' in v:
+        # Validate incident_time if present and set.
+        #
+        # The orchestrator always sets this key and it is legitimately None when
+        # the caller did not supply one, so None must be accepted.
+        if v.get('incident_time') is not None:
             incident_time = v['incident_time']
             if not isinstance(incident_time, (str, datetime)):
                 raise ValueError('incident_time must be a string or datetime object')
@@ -129,6 +132,11 @@ class ChangeCorrelatorAgent(AsyncBaseAgent):
         self.logger.info("Starting change correlation", agent=self.name)
 
         try:
+            # Validate through the agent-specific schema (see LogAnalyzerAgent).
+            input_data = ChangeCorrelatorAgentInput.model_validate(
+                input_data.model_dump()
+            )
+
             # Check cache first
             cached_result = await self.cache.get(self.name, input_data)
             if cached_result:

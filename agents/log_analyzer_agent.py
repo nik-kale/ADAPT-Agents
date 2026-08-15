@@ -42,13 +42,19 @@ class LogAnalyzerAgentInput(BaseAgentInput):
                         f'log entry at index {idx} must contain "message" or "msg" field'
                     )
         
-        # Validate time_range if present
-        if 'time_range' in v:
+        # Validate time_range if present AND non-empty.
+        #
+        # The orchestrator always sets this key, defaulting to {} when the
+        # caller omitted it, so requiring start/end on an empty dict would fail
+        # every analysis that does not specify an explicit time range.
+        if v.get('time_range'):
             time_range = v['time_range']
             if not isinstance(time_range, dict):
                 raise ValueError('time_range must be a dictionary')
             if 'start' not in time_range or 'end' not in time_range:
                 raise ValueError('time_range must contain "start" and "end" fields')
+        elif 'time_range' in v and not isinstance(v['time_range'], (dict, type(None))):
+            raise ValueError('time_range must be a dictionary')
         
         return v
     
@@ -127,6 +133,13 @@ class LogAnalyzerAgent(AsyncBaseAgent):
         self.logger.info("Starting log analysis", agent=self.name)
 
         try:
+            # Validate through the agent-specific schema. Callers (including the
+            # orchestrator) hand us a plain BaseAgentInput, so without this the
+            # LogAnalyzerAgentInput validators would never run.
+            input_data = LogAnalyzerAgentInput.model_validate(
+                input_data.model_dump()
+            )
+
             # Check cache first
             cached_result = await self.cache.get(self.name, input_data)
             if cached_result:

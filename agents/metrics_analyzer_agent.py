@@ -27,34 +27,37 @@ class MetricsAnalyzerAgentInput(BaseAgentInput):
         if not isinstance(v, dict):
             raise ValueError('context must be a dictionary')
         
-        # Validate metrics field if present
+        # Validate metrics field if present.
+        #
+        # The contract used throughout the codebase is a LIST of metric series,
+        # each a dict like {"name": ..., "service": ..., "timestamps": [...],
+        # "values": [...]} — see MetricsAnalyzerAgent._analyze_metrics, which
+        # iterates `for metric in metrics` and reads metric.get("name") /
+        # metric.get("values"). An empty list is valid and yields no findings.
         if 'metrics' in v:
-            if not isinstance(v['metrics'], dict):
-                raise ValueError('metrics must be a dictionary')
-            
-            for metric_name, metric_data in v['metrics'].items():
-                if not isinstance(metric_data, (list, dict)):
+            metrics = v['metrics']
+            if not isinstance(metrics, list):
+                raise ValueError(
+                    'metrics must be a list of metric series dictionaries'
+                )
+
+            for idx, metric in enumerate(metrics):
+                if not isinstance(metric, dict):
                     raise ValueError(
-                        f'metric "{metric_name}" must be a list or dictionary with time-series data'
+                        f'metric at index {idx} must be a dictionary'
                     )
-                
-                # If it's a list, validate it has data points
-                if isinstance(metric_data, list):
-                    if not metric_data:
-                        raise ValueError(f'metric "{metric_name}" cannot be empty')
-                    
-                    for idx, point in enumerate(metric_data):
-                        if not isinstance(point, dict):
-                            raise ValueError(
-                                f'data point at index {idx} in metric "{metric_name}" must be a dictionary'
-                            )
-                        
-                        if 'value' not in point and 'values' not in point:
-                            raise ValueError(
-                                f'data point at index {idx} in metric "{metric_name}" '
-                                'must contain "value" or "values" field'
-                            )
-        
+
+                if 'value' not in metric and 'values' not in metric:
+                    raise ValueError(
+                        f'metric at index {idx} must contain a "value" or "values" field'
+                    )
+
+                values = metric.get('values')
+                if values is not None and not isinstance(values, list):
+                    raise ValueError(
+                        f'"values" in metric at index {idx} must be a list'
+                    )
+
         return v
     
     @field_validator('parameters')
@@ -137,6 +140,11 @@ class MetricsAnalyzerAgent(AsyncBaseAgent):
         self.logger.info("Starting metrics analysis", agent=self.name)
 
         try:
+            # Validate through the agent-specific schema (see LogAnalyzerAgent).
+            input_data = MetricsAnalyzerAgentInput.model_validate(
+                input_data.model_dump()
+            )
+
             # Check cache first
             cached_result = await self.cache.get(self.name, input_data)
             if cached_result:

@@ -120,7 +120,7 @@ class AsyncAgentOrchestrator:
                 # Add phase 1 summary to span
                 add_span_attributes({
                     "phase1_agents_executed": len([r for r in phase1_results.values() if r]),
-                    "phase1_total_findings": sum(len(r.get("findings", [])) for r in phase1_results.values() if r)
+                    "phase1_total_findings": sum(len(r.findings) for r in phase1_results.values() if r)
                 })
 
             # Check if we have enough successful results to continue

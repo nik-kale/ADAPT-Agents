@@ -115,12 +115,100 @@ def get_api_key_info(api_key: str) -> dict:
 
 # === WebSocket Authentication ===
 
-# WebSocket token storage (in-memory, consider Redis for production)
-_ws_tokens = {}  # {token_hash: {api_key, expires_at, analysis_ids}}
-
 # Token configuration
 WS_TOKEN_EXPIRY_MINUTES = 15
 WS_TOKEN_LENGTH = 32
+
+
+class _WSTokenStore:
+    """
+    Storage for short-lived WebSocket tokens.
+
+    Backed by Redis when configured, otherwise by a process-local dict.
+
+    A process-local dict is only correct for single-process deployments: under
+    `uvicorn --workers N`, POST /ws/token mints the token in one worker while
+    the subsequent WebSocket upgrade may be routed to another, which would
+    reject a perfectly valid token. Redis makes the store shared.
+    """
+
+    _KEY_PREFIX = "ws_token:"
+
+    def __init__(self):
+        self._memory = {}
+        self._redis = None
+
+        settings = get_settings()
+        if settings.cache_backend == "redis" and settings.cache_redis_url:
+            try:
+                import redis
+                client = redis.from_url(
+                    settings.cache_redis_url,
+                    decode_responses=True,
+                    socket_connect_timeout=2
+                )
+                client.ping()
+                self._redis = client
+                auth_logger.info("WebSocket token store using Redis (multi-worker safe)")
+            except Exception as e:
+                auth_logger.warning(
+                    f"WebSocket token store failed to reach Redis ({e}); falling back "
+                    f"to in-process memory. This is NOT safe with multiple workers."
+                )
+
+        if self._redis is None:
+            auth_logger.info("WebSocket token store using in-process memory")
+
+    def set(self, token_hash: str, info: dict, ttl_seconds: int) -> None:
+        if self._redis is not None:
+            import json
+            payload = dict(info)
+            payload["expires_at"] = info["expires_at"].isoformat()
+            payload["created_at"] = info["created_at"].isoformat()
+            self._redis.setex(
+                f"{self._KEY_PREFIX}{token_hash}", ttl_seconds, json.dumps(payload)
+            )
+        else:
+            self._memory[token_hash] = info
+
+    def get(self, token_hash: str) -> Optional[dict]:
+        if self._redis is not None:
+            import json
+            raw = self._redis.get(f"{self._KEY_PREFIX}{token_hash}")
+            if raw is None:
+                return None
+            payload = json.loads(raw)
+            payload["expires_at"] = datetime.fromisoformat(payload["expires_at"])
+            payload["created_at"] = datetime.fromisoformat(payload["created_at"])
+            return payload
+        return self._memory.get(token_hash)
+
+    def delete(self, token_hash: str) -> None:
+        if self._redis is not None:
+            self._redis.delete(f"{self._KEY_PREFIX}{token_hash}")
+        else:
+            self._memory.pop(token_hash, None)
+
+    def purge_expired(self) -> int:
+        """Redis expires keys itself; only the memory backend needs sweeping."""
+        if self._redis is not None:
+            return 0
+        now = datetime.utcnow()
+        expired = [h for h, info in self._memory.items() if now > info["expires_at"]]
+        for token_hash in expired:
+            del self._memory[token_hash]
+        return len(expired)
+
+
+_ws_token_store: Optional[_WSTokenStore] = None
+
+
+def _get_ws_token_store() -> _WSTokenStore:
+    """Lazily construct the token store so settings are read at first use."""
+    global _ws_token_store
+    if _ws_token_store is None:
+        _ws_token_store = _WSTokenStore()
+    return _ws_token_store
 
 
 def generate_ws_token(api_key: str, analysis_ids: Optional[List[str]] = None) -> str:
@@ -139,12 +227,16 @@ def generate_ws_token(api_key: str, analysis_ids: Optional[List[str]] = None) ->
 
     expires_at = datetime.utcnow() + timedelta(minutes=WS_TOKEN_EXPIRY_MINUTES)
 
-    _ws_tokens[token_hash] = {
-        "api_key": api_key,
-        "expires_at": expires_at,
-        "analysis_ids": analysis_ids or [],
-        "created_at": datetime.utcnow()
-    }
+    _get_ws_token_store().set(
+        token_hash,
+        {
+            "api_key": api_key,
+            "expires_at": expires_at,
+            "analysis_ids": analysis_ids or [],
+            "created_at": datetime.utcnow()
+        },
+        ttl_seconds=WS_TOKEN_EXPIRY_MINUTES * 60
+    )
 
     # Clean up expired tokens
     _cleanup_expired_tokens()
@@ -175,7 +267,8 @@ def verify_ws_token(token: str, analysis_id: Optional[str] = None) -> dict:
         raise HTTPException(status_code=4001, detail="Missing WebSocket token")
 
     token_hash = hashlib.sha256(token.encode()).hexdigest()
-    token_info = _ws_tokens.get(token_hash)
+    store = _get_ws_token_store()
+    token_info = store.get(token_hash)
 
     if not token_info:
         auth_logger.warning(f"WebSocket authentication failed: token not found")
@@ -184,15 +277,34 @@ def verify_ws_token(token: str, analysis_id: Optional[str] = None) -> dict:
     # Check expiration
     if datetime.utcnow() > token_info["expires_at"]:
         auth_logger.warning(f"WebSocket authentication failed: token expired")
-        del _ws_tokens[token_hash]
+        store.delete(token_hash)
         raise HTTPException(status_code=4001, detail="WebSocket token expired")
 
-    # Check analysis_id access if specified
-    if analysis_id and token_info["analysis_ids"]:
-        if analysis_id not in token_info["analysis_ids"]:
+    # Enforce analysis scoping.
+    #
+    # A token carrying a non-empty analysis_ids list is RESTRICTED: it grants
+    # access only to those analyses. Previously the check was skipped whenever
+    # analysis_id was falsy, so a restricted token could reach unscoped
+    # endpoints (/ws/broadcast, or /ws/agent/{name} with analysis_id omitted)
+    # and observe traffic for every analysis in the system.
+    allowed_ids = token_info.get("analysis_ids") or []
+    if allowed_ids:
+        if not analysis_id:
+            auth_logger.warning(
+                f"WebSocket authentication failed: scoped token used on an "
+                f"unscoped endpoint | allowed={allowed_ids}"
+            )
+            raise HTTPException(
+                status_code=4003,
+                detail=(
+                    "This token is restricted to specific analyses and cannot be "
+                    "used on endpoints that are not scoped to a single analysis."
+                )
+            )
+        if analysis_id not in allowed_ids:
             auth_logger.warning(
                 f"WebSocket authentication failed: unauthorized analysis_id | "
-                f"requested={analysis_id} | allowed={token_info['analysis_ids']}"
+                f"requested={analysis_id} | allowed={allowed_ids}"
             )
             raise HTTPException(
                 status_code=4003,
@@ -208,16 +320,9 @@ def verify_ws_token(token: str, analysis_id: Optional[str] = None) -> dict:
 
 
 def _cleanup_expired_tokens():
-    """Remove expired WebSocket tokens from memory"""
-    now = datetime.utcnow()
-    expired = [
-        token_hash for token_hash, info in _ws_tokens.items()
-        if now > info["expires_at"]
-    ]
+    """Remove expired WebSocket tokens from the store"""
+    removed = _get_ws_token_store().purge_expired()
 
-    for token_hash in expired:
-        del _ws_tokens[token_hash]
-
-    if expired:
-        auth_logger.debug(f"Cleaned up {len(expired)} expired WebSocket tokens")
+    if removed:
+        auth_logger.debug(f"Cleaned up {removed} expired WebSocket tokens")
 

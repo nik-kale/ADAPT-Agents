@@ -105,9 +105,15 @@ class AgentCache:
 
     def _generate_key(self, agent_name: str, input_data: BaseAgentInput) -> str:
         """Generate cache key from input"""
-        # Create deterministic hash
+        # Create deterministic hash.
+        #
+        # default=str is required: phase 2/3 inputs embed Finding objects whose
+        # `timestamp` is a datetime, which json.dumps cannot serialize. Without
+        # it, every hypothesis and remediation run fails with
+        # "Object of type datetime is not JSON serializable". Only the cache key
+        # is affected, so a stringified form is sufficient and deterministic.
         input_dict = input_data.dict()
-        input_json = json.dumps(input_dict, sort_keys=True)
+        input_json = json.dumps(input_dict, sort_keys=True, default=str)
         hash_digest = hashlib.sha256(input_json.encode()).hexdigest()
         return f"agent:{agent_name}:{hash_digest}"
 

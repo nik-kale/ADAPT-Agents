@@ -520,31 +520,59 @@ class VectorDBManager:
                 "error": f"Backup directory not found: {backup_path}"
             }
         
+        # Stage the restore next to the live directory, then swap. Deleting the
+        # live database first means a failed copy (disk full, permissions,
+        # corrupt backup) destroys the knowledge base with no way back.
+        parent = self.persist_directory.parent
+        staging_dir = parent / f".{self.persist_directory.name}.restore_{uuid.uuid4().hex[:8]}"
+        retired_dir = parent / f".{self.persist_directory.name}.old_{uuid.uuid4().hex[:8]}"
+
         try:
-            # Remove current database
+            # 1. Copy the backup into staging and verify it opens.
+            shutil.copytree(backup_dir, staging_dir)
+
+            probe = chromadb.PersistentClient(
+                path=str(staging_dir),
+                settings=Settings(anonymized_telemetry=False, allow_reset=True)
+            )
+            probe.list_collections()
+            del probe
+
+            # 2. Release our handle on the live store before moving it.
+            self.client = None
+
+            # 3. Swap: retire current, promote staging.
             if self.persist_directory.exists():
-                shutil.rmtree(self.persist_directory)
-            
-            # Copy backup to persist directory
-            shutil.copytree(backup_dir, self.persist_directory)
-            
-            # Reinitialize client
+                shutil.move(str(self.persist_directory), str(retired_dir))
+            try:
+                shutil.move(str(staging_dir), str(self.persist_directory))
+            except Exception:
+                # Roll back to the retired copy so we never end up with nothing.
+                if retired_dir.exists() and not self.persist_directory.exists():
+                    shutil.move(str(retired_dir), str(self.persist_directory))
+                raise
+
+            # 4. Reinitialize against the restored directory.
             self.__init__(str(self.persist_directory))
-            
-            # Get stats
             stats = self.get_collection_stats()
-            
+
+            # 5. Only now discard the previous database.
+            if retired_dir.exists():
+                shutil.rmtree(retired_dir, ignore_errors=True)
+
             logger.info(f"Restore completed from {backup_path}")
-            
+
             return {
                 "success": True,
                 "backup_path": str(backup_dir),
                 "timestamp": datetime.utcnow().isoformat(),
                 "collections": stats
             }
-            
+
         except Exception as e:
             logger.error(f"Restore failed: {e}")
+            # Leave the live database untouched; clean up staging only.
+            shutil.rmtree(staging_dir, ignore_errors=True)
             return {
                 "success": False,
                 "error": str(e)
