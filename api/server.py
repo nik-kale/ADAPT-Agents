@@ -32,10 +32,12 @@ from datetime import datetime
 from collections import defaultdict
 from contextlib import asynccontextmanager
 from config.settings import get_settings
-from api.auth import get_api_key, generate_ws_token
+from api.auth import get_api_key, generate_ws_token, get_api_key_info
 from utils.rate_limiter import rate_limiter
 from utils.cleanup import get_cleanup_service, scheduled_cleanup_task
 from utils.circuit_breaker import circuit_breaker_registry
+
+logger = logging.getLogger(__name__)
 
 # Import WebSocket routes
 try:
@@ -287,8 +289,15 @@ async def add_rate_limit_headers(request: Request, call_next):
         try:
             from api.auth import get_api_key_info
             key_info = get_api_key_info(api_key_header)
+
+            # Only emit rate limit headers for recognized keys. Doing this for
+            # arbitrary header values lets an unauthenticated caller drive
+            # rate-limiter bookkeeping and leaks tier/limit details.
+            if not key_info:
+                return response
+
             tier = key_info.get('tier', 'free')
-            
+
             # Get rate limit info
             limit_info = rate_limiter.get_limit_info(api_key_header, tier)
             
@@ -435,13 +444,21 @@ class AnalysisRequest(BaseModel):
         if not isinstance(v, dict):
             raise ValueError("incident_data must be a dictionary")
         
-        # Validate at least one of the common data sources is present
-        required_fields = ['logs', 'metrics', 'changes', 'traces', 'events']
-        if not any(field in v for field in required_fields):
-            raise ValueError(
-                f"incident_data must contain at least one of: {', '.join(required_fields)}"
+        # Warn — do not reject — when no recognized data source is present.
+        #
+        # Hard-failing here is a breaking change for clients that were posting
+        # other shapes before this validator existed, and it is trivially
+        # satisfied by {"logs": []} anyway, so it blocks legitimate payloads
+        # without meaningfully constraining bad ones. The agents already handle
+        # missing sections by producing no findings for them.
+        known_sources = ['logs', 'metrics', 'changes', 'traces', 'events']
+        if not any(field in v for field in known_sources):
+            logger.warning(
+                "incident_data contains none of the recognized data sources (%s); "
+                "analysis will likely produce no findings. Keys present: %s",
+                ', '.join(known_sources), ', '.join(sorted(v.keys()))[:200]
             )
-        
+
         return v
     
     @validator('agents')
@@ -860,12 +877,9 @@ async def manual_cleanup(
     """
     cleanup_service = get_cleanup_service(DB_PATH)
     
+    result = await cleanup_service.run_full_cleanup(retention_days=retention_days)
     if retention_days is not None:
-        result = await cleanup_service.run_full_cleanup()
-        # Override retention for this run
         result["retention_days_override"] = retention_days
-    else:
-        result = await cleanup_service.run_full_cleanup()
     
     return {
         "message": "Cleanup completed",
@@ -992,8 +1006,10 @@ async def get_analysis(
     if not result:
         raise HTTPException(status_code=404, detail="Analysis not found")
 
-    # Add rate limit info
-    result["rate_limit_remaining"] = rate_limiter.get_remaining(api_key)
+    # Add rate limit info (tier-aware, so it agrees with X-RateLimit-Remaining)
+    result["rate_limit_remaining"] = rate_limiter.get_remaining(
+        api_key, get_api_key_info(api_key).get("tier", "free")
+    )
 
     return result
 
@@ -1115,7 +1131,9 @@ async def get_stats(api_key: str = Depends(get_api_key)):
         "total_analyses": total_analyses,
         "status_counts": status_counts,
         "avg_execution_time_ms": round(avg_execution_time, 2),
-        "rate_limit_remaining": rate_limiter.get_remaining(api_key)
+        "rate_limit_remaining": rate_limiter.get_remaining(
+            api_key, get_api_key_info(api_key).get("tier", "free")
+        )
     }
 
 

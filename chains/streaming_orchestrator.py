@@ -9,6 +9,22 @@ from chains.async_orchestrator import AsyncAgentOrchestrator
 from schemas import BaseAgentInput
 
 
+def _extract_findings(result) -> list:
+    """
+    Safely extract findings from a phase result.
+
+    Phase results are BaseAgentOutput models (attribute access), but may be an
+    Exception when asyncio.gather ran with return_exceptions=True, or None when
+    an agent was skipped.
+    """
+    if result is None or isinstance(result, Exception):
+        return []
+    findings = getattr(result, "findings", None)
+    if findings is None and isinstance(result, dict):
+        findings = result.get("findings")
+    return findings or []
+
+
 class StreamingOrchestrator(AsyncAgentOrchestrator):
     """
     Orchestrator with real-time streaming capabilities
@@ -167,10 +183,10 @@ class StreamingOrchestrator(AsyncAgentOrchestrator):
             # Prepare context with phase 1 findings
             hypothesis_context = {
                 **incident_data,
-                "log_findings": phase1_results.get("log_analyzer", {}).get("findings", []) if not isinstance(phase1_results.get("log_analyzer"), Exception) else [],
-                "metrics_findings": phase1_results.get("metrics_analyzer", {}).get("findings", []) if not isinstance(phase1_results.get("metrics_analyzer"), Exception) else [],
-                "change_findings": phase1_results.get("change_correlator", {}).get("findings", []) if not isinstance(phase1_results.get("change_correlator"), Exception) else [],
-                "topology_findings": phase1_results.get("topology_inference", {}).get("findings", []) if not isinstance(phase1_results.get("topology_inference"), Exception) else []
+                "log_findings": _extract_findings(phase1_results.get("log_analyzer")),
+                "metrics_findings": _extract_findings(phase1_results.get("metrics_analyzer")),
+                "change_findings": _extract_findings(phase1_results.get("change_correlator")),
+                "topology_findings": _extract_findings(phase1_results.get("topology_inference"))
             }
 
             hypothesis_input = BaseAgentInput(context=hypothesis_context)

@@ -198,21 +198,49 @@ class CircuitBreakerLLM(BaseLLM):
         if circuit_breaker_name is None:
             circuit_breaker_name = f"llm_{wrapped_llm.model}"
         
+        # No breaker-level fallback: a single fallback cannot satisfy the three
+        # different return types (str / Dict / LLMResponse). Each wrapper method
+        # below catches CircuitOpenError and returns its own correctly-typed
+        # degradation, while the breaker keeps one shared failure state.
         self.circuit_breaker = circuit_breaker_registry.get_or_create(
             name=circuit_breaker_name,
             failure_threshold=3,  # Open after 3 failures
             recovery_timeout=30,  # Try recovery after 30 seconds
             half_open_requests=2,  # Need 2 successes to close
             expected_exception=Exception,  # Catch all exceptions
-            fallback=self._fallback_response
+            fallback=None
         )
         
         logger.info(f"LLM circuit breaker initialized: {circuit_breaker_name}")
     
+    _FALLBACK_TEXT = "LLM service unavailable. Analysis will use rule-based methods only."
+
     async def _fallback_response(self, *args, **kwargs) -> str:
-        """Fallback response when circuit is open"""
+        """Fallback for generate() — callers expect a plain string."""
         logger.warning("LLM circuit breaker: Using fallback (rule-based) response")
-        return "LLM service unavailable. Analysis will use rule-based methods only."
+        return self._FALLBACK_TEXT
+
+    async def _fallback_structured(self, *args, **kwargs) -> Dict[str, Any]:
+        """
+        Fallback for generate_structured() — callers expect a dict.
+
+        Returning the plain string here would make callers such as
+        LogAnalyzerAgent (`llm_response.get("findings", [])`) raise
+        AttributeError, turning an open circuit into a type error instead of a
+        clean degradation.
+        """
+        logger.warning("LLM circuit breaker: Using fallback structured response")
+        return {"findings": [], "error": self._FALLBACK_TEXT, "degraded": True}
+
+    async def _fallback_messages(self, *args, **kwargs) -> LLMResponse:
+        """Fallback for generate_with_messages() — callers expect an LLMResponse."""
+        logger.warning("LLM circuit breaker: Using fallback message response")
+        return LLMResponse(
+            content=self._FALLBACK_TEXT,
+            model=self.model,
+            usage={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+            finish_reason="circuit_open"
+        )
     
     async def generate(
         self,
@@ -221,12 +249,16 @@ class CircuitBreakerLLM(BaseLLM):
         **kwargs
     ) -> str:
         """Generate with circuit breaker protection"""
-        return await self.circuit_breaker.execute(
-            self.wrapped_llm.generate,
-            prompt,
-            system_prompt,
-            **kwargs
-        )
+        from utils.circuit_breaker import CircuitOpenError
+        try:
+            return await self.circuit_breaker.execute(
+                self.wrapped_llm.generate,
+                prompt,
+                system_prompt,
+                **kwargs
+            )
+        except CircuitOpenError:
+            return await self._fallback_response()
     
     async def generate_structured(
         self,
@@ -236,13 +268,17 @@ class CircuitBreakerLLM(BaseLLM):
         **kwargs
     ) -> Dict[str, Any]:
         """Generate structured response with circuit breaker protection"""
-        return await self.circuit_breaker.execute(
-            self.wrapped_llm.generate_structured,
-            prompt,
-            schema,
-            system_prompt,
-            **kwargs
-        )
+        from utils.circuit_breaker import CircuitOpenError
+        try:
+            return await self.circuit_breaker.execute(
+                self.wrapped_llm.generate_structured,
+                prompt,
+                schema,
+                system_prompt,
+                **kwargs
+            )
+        except CircuitOpenError:
+            return await self._fallback_structured()
     
     async def generate_with_messages(
         self,
@@ -250,11 +286,15 @@ class CircuitBreakerLLM(BaseLLM):
         **kwargs
     ) -> LLMResponse:
         """Generate from messages with circuit breaker protection"""
-        return await self.circuit_breaker.execute(
-            self.wrapped_llm.generate_with_messages,
-            messages,
-            **kwargs
-        )
+        from utils.circuit_breaker import CircuitOpenError
+        try:
+            return await self.circuit_breaker.execute(
+                self.wrapped_llm.generate_with_messages,
+                messages,
+                **kwargs
+            )
+        except CircuitOpenError:
+            return await self._fallback_messages()
     
     async def stream(
         self,
@@ -282,7 +322,10 @@ class CircuitBreakerLLM(BaseLLM):
 
 
 # Global LLM instance
-_llm_instance: Optional[BaseLLM] = None
+# Cached per wrapping mode. A single slot would let the first caller decide the
+# mode for the whole process — e.g. /health calling get_llm() would pin the
+# circuit-breaker-wrapped instance for every later get_llm(enable_circuit_breaker=False).
+_llm_instances: Dict[bool, BaseLLM] = {}
 
 
 def get_llm(enable_circuit_breaker: bool = True) -> BaseLLM:
@@ -298,10 +341,9 @@ def get_llm(enable_circuit_breaker: bool = True) -> BaseLLM:
     Raises:
         ValueError: If LLM provider not configured or API key missing
     """
-    global _llm_instance
-
-    if _llm_instance is not None:
-        return _llm_instance
+    cached = _llm_instances.get(enable_circuit_breaker)
+    if cached is not None:
+        return cached
 
     from config.settings import get_settings
     settings = get_settings()
@@ -338,8 +380,9 @@ def get_llm(enable_circuit_breaker: bool = True) -> BaseLLM:
     # Wrap with circuit breaker for production resilience
     if enable_circuit_breaker:
         logger.info(f"Wrapping {settings.llm_provider} LLM with circuit breaker")
-        _llm_instance = CircuitBreakerLLM(base_llm)
+        instance: BaseLLM = CircuitBreakerLLM(base_llm)
     else:
-        _llm_instance = base_llm
+        instance = base_llm
 
-    return _llm_instance
+    _llm_instances[enable_circuit_breaker] = instance
+    return instance

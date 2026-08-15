@@ -8,8 +8,9 @@ import sqlite3
 import asyncio
 import logging
 from datetime import datetime, timedelta
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from pathlib import Path
+from contextlib import closing
 
 from config.settings import get_settings
 
@@ -48,50 +49,59 @@ class DataCleanupService:
         logger.info(f"Starting cleanup: retention_days={retention_days}, cutoff={cutoff_timestamp}")
         
         try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            
-            # Find old analyses
-            cursor.execute("""
-                SELECT id, created_at FROM analyses
-                WHERE created_at < ?
-                ORDER BY created_at ASC
-                LIMIT ?
-            """, (cutoff_timestamp, self.settings.cleanup_batch_size))
-            
-            old_analyses = cursor.fetchall()
-            analysis_ids = [row[0] for row in old_analyses]
-            
-            if not analysis_ids:
-                logger.info("No old analyses to clean up")
-                conn.close()
-                return {"deleted": 0, "cutoff_date": cutoff_timestamp}
-            
-            # Delete old analyses
-            placeholders = ','.join('?' * len(analysis_ids))
-            cursor.execute(f"""
-                DELETE FROM analyses WHERE id IN ({placeholders})
-            """, analysis_ids)
-            
-            deleted_count = cursor.rowcount
-            conn.commit()
-            conn.close()
-            
+            # `with` commits/rolls back the transaction but does not close the
+            # handle, so closing is handled by the outer contextlib.closing.
+            with closing(sqlite3.connect(self.db_path)) as conn, conn:
+                cursor = conn.cursor()
+
+                # Find old analyses
+                cursor.execute("""
+                    SELECT id, created_at FROM analyses
+                    WHERE created_at < ?
+                    ORDER BY created_at ASC
+                    LIMIT ?
+                """, (cutoff_timestamp, self.settings.cleanup_batch_size))
+
+                old_analyses = cursor.fetchall()
+                analysis_ids = [row[0] for row in old_analyses]
+
+                if not analysis_ids:
+                    logger.info("No old analyses to clean up")
+                    return {"deleted": 0, "child_rows_deleted": 0, "cutoff_date": cutoff_timestamp}
+
+                placeholders = ','.join('?' * len(analysis_ids))
+
+                # Delete dependent rows first. SQLite does not enforce foreign
+                # keys by default, so agent_executions rows would otherwise be
+                # orphaned forever and grow without bound.
+                cursor.execute(f"""
+                    DELETE FROM agent_executions WHERE analysis_id IN ({placeholders})
+                """, analysis_ids)
+                child_deleted = cursor.rowcount
+
+                # Delete the parent analyses
+                cursor.execute(f"""
+                    DELETE FROM analyses WHERE id IN ({placeholders})
+                """, analysis_ids)
+                deleted_count = cursor.rowcount
+
             # Update stats
             self.cleanup_stats["analyses_deleted"] += deleted_count
             self.cleanup_stats["total_cleaned"] += deleted_count
             self.cleanup_stats["last_run"] = datetime.utcnow().isoformat()
-            
+
             logger.info(
-                f"Cleanup completed: deleted {deleted_count} analyses older than {cutoff_timestamp}"
+                f"Cleanup completed: deleted {deleted_count} analyses and "
+                f"{child_deleted} agent_execution rows older than {cutoff_timestamp}"
             )
-            
+
             return {
                 "deleted": deleted_count,
+                "child_rows_deleted": child_deleted,
                 "cutoff_date": cutoff_timestamp,
                 "analysis_ids": analysis_ids[:10]  # Return first 10 for logging
             }
-            
+
         except Exception as e:
             logger.error(f"Error during cleanup: {e}")
             raise
@@ -178,15 +188,25 @@ class DataCleanupService:
             logger.error(f"Error getting database size: {e}")
             return {"error": str(e)}
     
-    async def run_full_cleanup(self) -> Dict[str, Any]:
-        """Run complete cleanup process"""
-        logger.info("Starting full cleanup process")
-        
+    async def run_full_cleanup(self, retention_days: Optional[int] = None) -> Dict[str, Any]:
+        """
+        Run complete cleanup process
+
+        Args:
+            retention_days: Optional override for the configured retention period.
+                            Falls back to settings.data_retention_days when None.
+        """
+        effective_retention = (
+            retention_days if retention_days is not None
+            else self.settings.data_retention_days
+        )
+        logger.info(f"Starting full cleanup process (retention_days={effective_retention})")
+
         # Get size before cleanup
         size_before = await self.get_database_size()
-        
+
         # Clean old analyses
-        analysis_cleanup = await self.cleanup_old_analyses()
+        analysis_cleanup = await self.cleanup_old_analyses(retention_days=retention_days)
         
         # Clean orphaned embeddings
         embedding_cleanup = await self.cleanup_orphaned_embeddings()
@@ -203,7 +223,7 @@ class DataCleanupService:
             "space_reclaimed_mb": round(space_reclaimed_mb, 2),
             "size_before_mb": size_before.get("total_size_mb", 0),
             "size_after_mb": size_after.get("total_size_mb", 0),
-            "retention_days": self.settings.data_retention_days
+            "retention_days": effective_retention
         }
         
         logger.info(f"Full cleanup completed: {result}")
